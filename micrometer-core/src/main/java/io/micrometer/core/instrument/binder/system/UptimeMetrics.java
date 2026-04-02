@@ -15,6 +15,7 @@
  */
 package io.micrometer.core.instrument.binder.system;
 
+import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.TimeGauge;
@@ -23,6 +24,7 @@ import io.micrometer.core.instrument.binder.MeterBinder;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.util.concurrent.TimeUnit;
+import java.util.function.ToDoubleFunction;
 
 import static java.util.Collections.emptyList;
 
@@ -53,9 +55,10 @@ public class UptimeMetrics implements MeterBinder {
 
     @Override
     public void bindTo(MeterRegistry registry) {
-        TimeGauge.builder("process.uptime", runtimeMXBean, TimeUnit.MILLISECONDS, RuntimeMXBean::getUptime)
+        FunctionCounter.builder("process.uptime", runtimeMXBean, (ToDoubleFunction<RuntimeMXBean>) RuntimeMXBean::getUptime)
             .tags(tags)
             .description("The uptime of the Java virtual machine")
+            .baseUnit(TimeUnit.MILLISECONDS.name().toLowerCase())
             .register(registry);
 
         TimeGauge.builder("process.start.time", runtimeMXBean, TimeUnit.MILLISECONDS, RuntimeMXBean::getStartTime)
