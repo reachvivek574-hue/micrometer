@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,7 +31,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Jon Schneider
  */
 class DatabaseTableMetricsTest {
+
     private MeterRegistry registry;
+
     private JDBCDataSource ds;
 
     @BeforeEach
@@ -41,10 +43,12 @@ class DatabaseTableMetricsTest {
         ds = new JDBCDataSource();
         ds.setURL("jdbc:hsqldb:mem:test");
 
+        // tag::statement[]
         try (Connection conn = ds.getConnection()) {
             conn.prepareStatement("CREATE TABLE foo (id int)").execute();
             conn.prepareStatement("INSERT INTO foo VALUES (1)").executeUpdate();
         }
+        // end::statement[]
     }
 
     @AfterEach
@@ -56,19 +60,19 @@ class DatabaseTableMetricsTest {
 
     @Test
     void rowCountGauge() {
+        // tag::monitor[]
         DatabaseTableMetrics.monitor(registry, "foo", "mydb", ds);
-        assertThat(registry.get("db.table.size")
-                .tag("table", "foo")
-                .tag("db", "mydb")
-                .gauge().value()).isEqualTo(1.0);
+        // end::monitor[]
+
+        // tag::result[]
+        assertThat(registry.get("db.table.size").tag("table", "foo").tag("db", "mydb").gauge().value()).isEqualTo(1.0);
+        // end::result[]
     }
 
     @Test
     void rowCountForNonExistentTable() {
         DatabaseTableMetrics.monitor(registry, "dne", "mydb", ds);
-        assertThat(registry.get("db.table.size")
-                .tag("table", "dne")
-                .tag("db", "mydb")
-                .gauge().value()).isEqualTo(0.0);
+        assertThat(registry.get("db.table.size").tag("table", "dne").tag("db", "mydb").gauge().value()).isEqualTo(0.0);
     }
+
 }

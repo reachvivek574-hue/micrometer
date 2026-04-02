@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2018 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,37 +15,24 @@
  */
 package io.micrometer.core.instrument.binder.cache;
 
+import io.micrometer.core.Issue;
+import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-
-import javax.cache.Cache;
-import javax.cache.CacheManager;
-import javax.management.Attribute;
-import javax.management.AttributeList;
-import javax.management.AttributeNotFoundException;
-import javax.management.DynamicMBean;
-import javax.management.InvalidAttributeValueException;
-import javax.management.MBeanException;
-import javax.management.MBeanInfo;
-import javax.management.MBeanServer;
-import javax.management.MBeanServerFactory;
-import javax.management.MalformedObjectNameException;
-import javax.management.ObjectName;
-import javax.management.ReflectionException;
-
-import java.net.URI;
-import java.util.Random;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.test.util.ReflectionTestUtils;
+
+import javax.cache.Cache;
+import javax.cache.CacheManager;
+import javax.management.*;
+import java.net.URI;
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -55,28 +42,35 @@ import static org.mockito.Mockito.when;
  */
 class JCacheMetricsTest extends AbstractCacheMetricsTest {
 
-    @Mock
-    private Cache<String, String> cache;
+    @SuppressWarnings("unchecked")
+    // tag::setup[]
+    Cache<String, String> cache;
 
-    @Mock
+    JCacheMetrics<String, String, Cache<String, String>> metrics;
+
+    // end::setup[]
+
     private CacheManager cacheManager;
 
-    private JCacheMetrics metrics;
     private MBeanServer mbeanServer;
+
     private Long expectedAttributeValue = new Random().nextLong();
 
     @BeforeEach
     void setup() throws Exception {
-        MockitoAnnotations.initMocks(this);
+        cache = mock(Cache.class);
+        cacheManager = mock(CacheManager.class);
         when(cache.getCacheManager()).thenReturn(cacheManager);
         when(cache.getName()).thenReturn("testCache");
         when(cacheManager.getURI()).thenReturn(new URI("http://localhost"));
-        metrics = new JCacheMetrics(cache, expectedTag);
+        // tag::setup_2[]
+        metrics = new JCacheMetrics<>(cache, expectedTag);
+        // end::setup_2[]
 
         // emulate MBean server with MBean used for statistic lookup
         mbeanServer = MBeanServerFactory.createMBeanServer();
         ObjectName objectName = new ObjectName("javax.cache:type=CacheStatistics");
-        ReflectionTestUtils.setField(metrics, "objectName", objectName);
+        metrics.objectName = objectName;
         CacheMBeanStub mBean = new CacheMBeanStub(expectedAttributeValue);
         mbeanServer.registerMBean(mBean, objectName);
     }
@@ -90,19 +84,23 @@ class JCacheMetricsTest extends AbstractCacheMetricsTest {
 
     @Test
     void reportExpectedMetrics() {
+        // tag::register[]
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
         metrics.bindTo(meterRegistry);
+        // end::register[]
 
         verifyCommonCacheMetrics(meterRegistry, metrics);
 
-        Gauge cacheRemovals = fetch(meterRegistry, "cache.removals").gauge();
-        assertThat(cacheRemovals.value()).isEqualTo(expectedAttributeValue.doubleValue());
+        FunctionCounter cacheRemovals = fetch(meterRegistry, "cache.removals").functionCounter();
+        assertThat(cacheRemovals.count()).isEqualTo(expectedAttributeValue.doubleValue());
     }
 
     @Test
     void constructInstanceViaStaticMethodMonitor() {
+        // tag::monitor[]
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
         JCacheMetrics.monitor(meterRegistry, cache, expectedTag);
+        // end::monitor[]
 
         meterRegistry.get("cache.removals").tags(expectedTag).gauge();
     }
@@ -143,8 +141,7 @@ class JCacheMetricsTest extends AbstractCacheMetricsTest {
     @Test
     void defaultValueWhenNoMBeanAttributeFound() throws MalformedObjectNameException {
         // change source MBean to emulate AttributeNotFoundException
-        ObjectName objectName = new ObjectName("javax.cache:type=CacheInformation");
-        ReflectionTestUtils.setField(metrics, "objectName", objectName);
+        metrics.objectName = new ObjectName("javax.cache:type=CacheInformation");
 
         assertThat(metrics.hitCount()).isEqualTo(0L);
     }
@@ -153,7 +150,7 @@ class JCacheMetricsTest extends AbstractCacheMetricsTest {
     void defaultValueWhenObjectNameNotInitialized() throws MalformedObjectNameException {
         // set cacheManager to null to emulate scenario when objectName not initialized
         when(cache.getCacheManager()).thenReturn(null);
-        metrics = new JCacheMetrics(cache, expectedTag);
+        metrics = new JCacheMetrics<>(cache, expectedTag);
 
         assertThat(metrics.hitCount()).isEqualTo(0L);
     }
@@ -162,11 +159,21 @@ class JCacheMetricsTest extends AbstractCacheMetricsTest {
     void doNotReportMetricWhenObjectNameNotInitialized() throws MalformedObjectNameException {
         // set cacheManager to null to emulate scenario when objectName not initialized
         when(cache.getCacheManager()).thenReturn(null);
-        metrics = new JCacheMetrics(cache, expectedTag);
+        metrics = new JCacheMetrics<>(cache, expectedTag);
         MeterRegistry registry = new SimpleMeterRegistry();
         metrics.bindImplementationSpecificMetrics(registry);
 
-        assertThat(registry.find("cache.removals").tags(expectedTag).functionCounter()).isNull();
+        assertThat(registry.find("cache.removals").tags(expectedTag).meter()).isNull();
+    }
+
+    @Test
+    @Issue("#2754")
+    void cacheRemovalsIsGaugeWhenConfigured() {
+        MeterRegistry meterRegistry = new SimpleMeterRegistry();
+        metrics = new JCacheMetrics<>(cache, expectedTag, false);
+        metrics.bindTo(meterRegistry);
+
+        assertThat(meterRegistry.get("cache.removals").tags(expectedTag).meter()).isNotNull().isInstanceOf(Gauge.class);
     }
 
     private static class CacheMBeanStub implements DynamicMBean {
@@ -178,29 +185,30 @@ class JCacheMetricsTest extends AbstractCacheMetricsTest {
         }
 
         @Override
-        public Object getAttribute(String attribute) throws AttributeNotFoundException, MBeanException, ReflectionException {
+        public Object getAttribute(String attribute)
+                throws AttributeNotFoundException, MBeanException, ReflectionException {
             return expectedAttributeValue;
         }
 
         @Override
-        public void setAttribute(Attribute attribute) throws AttributeNotFoundException, InvalidAttributeValueException, MBeanException, ReflectionException {
+        public void setAttribute(Attribute attribute)
+                throws AttributeNotFoundException, InvalidAttributeValueException, MBeanException, ReflectionException {
         }
 
         @Override
         public AttributeList getAttributes(String[] attributes) {
-            return null;
+            return mock(AttributeList.class);
         }
 
         @Override
         public AttributeList setAttributes(AttributeList attributes) {
-            return null;
+            return attributes;
         }
 
         @Override
-        public Object invoke(String actionName,
-                             Object[] params,
-                             String[] signature) throws MBeanException, ReflectionException {
-            return null;
+        public Object invoke(String actionName, Object[] params, String[] signature)
+                throws MBeanException, ReflectionException {
+            return new Object();
         }
 
         @Override

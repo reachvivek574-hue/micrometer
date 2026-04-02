@@ -1,7 +1,9 @@
 dependencies {
-    compile project(':micrometer-core')
-    compile 'io.dropwizard.metrics:metrics-graphite:4.0.+'
+    api project(':micrometer-core')
 
-    testCompile project(':micrometer-test')
-    testCompile 'io.projectreactor.netty:reactor-netty:latest.release'
+    api libs.dropwizardMetricsGraphite
+
+    testImplementation project(':micrometer-test')
+    testImplementation platform(libs.reactorBom)
+    testImplementation 'io.projectreactor.netty:reactor-netty-core'
 }

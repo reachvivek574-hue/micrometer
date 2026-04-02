@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,6 +25,7 @@ import io.micrometer.core.instrument.simple.SimpleConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.core.instrument.step.StepMeterRegistry;
 import io.micrometer.core.instrument.step.StepRegistryConfig;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -54,8 +55,11 @@ import static org.mockito.Mockito.verify;
  * @author Johnny Lim
  */
 class CompositeMeterRegistryTest {
+
     private MockClock clock = new MockClock();
+
     private CompositeMeterRegistry composite = new CompositeMeterRegistry();
+
     private SimpleMeterRegistry simple = new SimpleMeterRegistry(SimpleConfig.DEFAULT, clock);
 
     @Test
@@ -71,7 +75,7 @@ class CompositeMeterRegistryTest {
 
         Counter.builder("counter").baseUnit(BaseUnits.BYTES).register(composite);
         DistributionSummary.builder("summary").baseUnit(BaseUnits.BYTES).register(composite);
-        Gauge.builder("gauge", new AtomicInteger(0), AtomicInteger::get).baseUnit(BaseUnits.BYTES).register(composite);
+        Gauge.builder("gauge", new AtomicInteger(), AtomicInteger::get).baseUnit(BaseUnits.BYTES).register(composite);
 
         assertThat(simple.get("counter").counter().getId().getBaseUnit()).isEqualTo(BaseUnits.BYTES);
         assertThat(simple.get("summary").summary().getId().getBaseUnit()).isEqualTo(BaseUnits.BYTES);
@@ -92,7 +96,8 @@ class CompositeMeterRegistryTest {
         composite.remove(simple);
         compositeCounter.increment();
 
-        // simple counter doesn't receive the increment after simple is removed from the composite
+        // simple counter doesn't receive the increment after simple is removed from the
+        // composite
         assertThat(simpleCounter.count()).isEqualTo(1);
 
         composite.add(simple);
@@ -144,8 +149,9 @@ class CompositeMeterRegistryTest {
     @DisplayName("common tags added to the composite affect meters registered with registries in the composite")
     @Test
     void commonTags() {
-        simple.config().commonTags("instance", "local"); // added alongside other common tags in the composite
-        simple.config().commonTags("region", "us-west-1"); // overriden by the composite
+        simple.config().commonTags("instance", "local"); // added alongside other common
+                                                         // tags in the composite
+        simple.config().commonTags("region", "us-west-1"); // overridden by the composite
 
         composite.config().commonTags("region", "us-east-1");
         composite.add(simple);
@@ -153,8 +159,7 @@ class CompositeMeterRegistryTest {
 
         composite.counter("counter").increment();
 
-        simple.get("counter").tags("region", "us-east-1", "stack", "test",
-                "instance", "local").counter();
+        simple.get("counter").tags("region", "us-east-1", "stack", "test", "instance", "local").counter();
     }
 
     @DisplayName("function timer base units are delegated to registries in the composite")
@@ -163,8 +168,7 @@ class CompositeMeterRegistryTest {
         composite.add(simple);
         Object o = new Object();
 
-        composite.more().timer("function.timer", emptyList(),
-                o, o2 -> 1, o2 -> 1, TimeUnit.MILLISECONDS);
+        composite.more().timer("function.timer", emptyList(), o, o2 -> 1, o2 -> 1, TimeUnit.MILLISECONDS);
 
         FunctionTimer functionTimer = simple.get("function.timer").functionTimer();
         assertThat(functionTimer.count()).isEqualTo(1);
@@ -177,8 +181,7 @@ class CompositeMeterRegistryTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         CompositeMeterRegistry compositeMeterRegistry = new CompositeMeterRegistry();
 
-        FunctionCounter.builder("foo", 1L, x -> x)
-                .register(compositeMeterRegistry);
+        FunctionCounter.builder("foo", 1L, x -> x).register(compositeMeterRegistry);
 
         compositeMeterRegistry.add(registry);
     }
@@ -199,7 +202,8 @@ class CompositeMeterRegistryTest {
         assertThat(simple.find("deny.child").meter()).isNull();
         composite.get("deny.child").meter();
 
-        // if the meter is registered directly to the child, the composite config does not take effect
+        // if the meter is registered directly to the child, the composite config does not
+        // take effect
         simple.counter("deny.composite");
         simple.get("deny.composite").meter();
     }
@@ -208,10 +212,9 @@ class CompositeMeterRegistryTest {
     void histogramConfigDefaultIsNotAffectedByComposite() {
         composite.add(simple);
 
-        // the expiry on this timer is determined by the simple registry's default histogram config
-        Timer t = Timer.builder("my.timer")
-                .distributionStatisticBufferLength(1)
-                .register(composite);
+        // the expiry on this timer is determined by the simple registry's default
+        // histogram config
+        Timer t = Timer.builder("my.timer").distributionStatisticBufferLength(1).register(composite);
 
         t.record(1, TimeUnit.SECONDS);
         assertThat(t.max(TimeUnit.SECONDS)).isEqualTo(1.0);
@@ -299,15 +302,12 @@ class CompositeMeterRegistryTest {
         composite.add(composite2);
 
         CountDownLatch latch = new CountDownLatch(1);
-        Flux.range(0, 10000)
-                .parallel(8)
-                .doOnTerminate(latch::countDown)
-                .runOn(Schedulers.parallel())
-                .subscribe(n -> {
-                    if (n % 2 == 0)
-                        composite2.add(simple);
-                    else composite2.remove(simple);
-                });
+        Flux.range(0, 10000).parallel(8).doOnTerminate(latch::countDown).runOn(Schedulers.parallel()).subscribe(n -> {
+            if (n % 2 == 0)
+                composite2.add(simple);
+            else
+                composite2.remove(simple);
+        });
 
         latch.await(10, TimeUnit.SECONDS);
         assertThat(latch.getCount()).isZero();
@@ -328,7 +328,8 @@ class CompositeMeterRegistryTest {
         verify(registry2).close();
     }
 
-    private class CountingMeterRegistry extends StepMeterRegistry {
+    private static class CountingMeterRegistry extends StepMeterRegistry {
+
         Map<Meter.Id, Integer> publishCountById = new HashMap<>();
 
         public CountingMeterRegistry() {
@@ -339,7 +340,7 @@ class CompositeMeterRegistryTest {
                 }
 
                 @Override
-                public String get(String key) {
+                public @Nullable String get(String key) {
                     return null;
                 }
 
@@ -369,6 +370,7 @@ class CompositeMeterRegistryTest {
         protected TimeUnit getBaseTimeUnit() {
             return TimeUnit.MILLISECONDS;
         }
+
     }
 
     @Test
@@ -377,15 +379,17 @@ class CompositeMeterRegistryTest {
         CountingMeterRegistry counting = new CountingMeterRegistry();
         registry.add(counting);
 
-        Meter custom = Meter.builder("custom", Meter.Type.COUNTER, singletonList(new Measurement(() -> 1.0, Statistic.COUNT)))
-                .register(registry);
+        Meter custom = Meter
+            .builder("custom", Meter.Type.COUNTER, singletonList(new Measurement(() -> 1.0, Statistic.COUNT)))
+            .register(registry);
         counting.publish();
         registry.remove(custom);
         counting.publish();
         assertThat(counting.count(custom)).isEqualTo(1);
 
         AtomicInteger tgObj = new AtomicInteger(1);
-        registry.more().timeGauge("timegauge", Tags.empty(), tgObj, TimeUnit.MILLISECONDS, AtomicInteger::incrementAndGet);
+        registry.more()
+            .timeGauge("timegauge", Tags.empty(), tgObj, TimeUnit.MILLISECONDS, AtomicInteger::incrementAndGet);
         TimeGauge timeGauge = registry.get("timegauge").timeGauge();
         counting.publish();
         registry.remove(timeGauge);
@@ -432,8 +436,9 @@ class CompositeMeterRegistryTest {
         assertThat(counting.count(ltt)).isEqualTo(1);
 
         AtomicInteger ftObj = new AtomicInteger(1);
-        registry.more().timer("functiontimer", Tags.empty(), ftObj, AtomicInteger::incrementAndGet,
-                AtomicInteger::get, TimeUnit.MILLISECONDS);
+        registry.more()
+            .timer("functiontimer", Tags.empty(), ftObj, AtomicInteger::incrementAndGet, AtomicInteger::get,
+                    TimeUnit.MILLISECONDS);
         FunctionTimer functionTimer = registry.get("functiontimer").functionTimer();
         counting.publish();
         registry.remove(functionTimer);
@@ -462,16 +467,18 @@ class CompositeMeterRegistryTest {
         for (int i = 0; i < count; i++) {
             int tagValue = i % tagCount;
             executor.execute(() -> {
-                Counter counter = Counter.builder(meterName).tag(tagName, String.valueOf(tagValue))
-                        .register(this.composite);
+                Counter counter = Counter.builder(meterName)
+                    .tag(tagName, String.valueOf(tagValue))
+                    .register(this.composite);
                 counter.increment();
             });
         }
         executor.shutdown();
         assertThat(executor.awaitTermination(1L, TimeUnit.SECONDS)).isTrue();
         for (int i = 0; i < tagCount; i++) {
-            assertThat(this.composite.find(meterName).tag(tagName, String.valueOf(i)).counter().count())
-                    .isEqualTo(count / tagCount);
+            Counter counter = this.composite.find(meterName).tag(tagName, String.valueOf(i)).counter();
+            assertThat(counter).isNotNull();
+            assertThat(counter.count()).isEqualTo((double) count / tagCount);
         }
     }
 

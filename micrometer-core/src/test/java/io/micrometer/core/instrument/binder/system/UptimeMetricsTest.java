@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.management.RuntimeMXBean;
 
 import static java.util.Collections.emptyList;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -46,13 +46,16 @@ class UptimeMetricsTest {
 
     @Test
     void uptimeMetricsMock() {
-        MeterRegistry registry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, new MockClock());
         RuntimeMXBean runtimeMXBean = mock(RuntimeMXBean.class);
         when(runtimeMXBean.getUptime()).thenReturn(1337L);
         when(runtimeMXBean.getStartTime()).thenReturn(4711L);
+        // tag::example[]
+        MeterRegistry registry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, new MockClock());
         new UptimeMetrics(runtimeMXBean, emptyList()).bindTo(registry);
 
         assertThat(registry.get("process.uptime").timeGauge().value()).isEqualTo(1.337);
         assertThat(registry.get("process.start.time").timeGauge().value()).isEqualTo(4.711);
+        // end::example[]
     }
+
 }

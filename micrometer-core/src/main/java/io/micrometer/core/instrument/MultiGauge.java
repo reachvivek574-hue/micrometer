@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2018 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,7 +16,7 @@
 package io.micrometer.core.instrument;
 
 import io.micrometer.core.annotation.Incubating;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -34,8 +34,11 @@ import static java.util.stream.Collectors.toSet;
  */
 @Incubating(since = "1.1.0")
 public class MultiGauge {
+
     private final MeterRegistry registry;
+
     private final Meter.Id commonId;
+
     private final AtomicReference<Set<Meter.Id>> registeredRows = new AtomicReference<>(emptySet());
 
     private MultiGauge(MeterRegistry registry, Meter.Id commonId) {
@@ -51,37 +54,37 @@ public class MultiGauge {
         return new Builder(name);
     }
 
-    public void register(Iterable<Row<?>> rows) {
+    public void register(Iterable<? extends Row<?>> rows) {
         register(rows, false);
     }
 
     @SuppressWarnings("unchecked")
-    public void register(Iterable<Row<?>> rows, boolean overwrite) {
+    public void register(Iterable<? extends Row<?>> rows, boolean overwrite) {
         registeredRows.getAndUpdate(oldRows -> {
-            // for some reason the compiler needs type assistance by creating this intermediate variable.
-            Stream<Meter.Id> idStream = StreamSupport.stream(rows.spliterator(), false)
-                    .map(row -> {
-                        Row r = row;
-                        Meter.Id rowId = commonId.withTags(row.uniqueTags);
-                        boolean previouslyDefined = oldRows.contains(rowId);
+            // for some reason the compiler needs type assistance by creating this
+            // intermediate variable.
+            Stream<Meter.Id> idStream = StreamSupport.stream(rows.spliterator(), false).map(row -> {
+                Row r = row;
+                Meter.Id preFilteredId = commonId.withTags(r.uniqueTags);
+                Meter.Id rowId = registry.getMappedId(preFilteredId);
+                boolean previouslyDefined = oldRows.contains(rowId);
 
-                        if (overwrite && previouslyDefined) {
-                            registry.removeByPreFilterId(rowId);
-                        }
+                if (overwrite && previouslyDefined) {
+                    registry.removeByPreFilterId(preFilteredId);
+                }
 
-                        if (overwrite || !previouslyDefined) {
-                            registry.gauge(rowId, row.obj, new StrongReferenceGaugeFunction<>(r.obj, r.valueFunction));
-                        }
+                if (overwrite || !previouslyDefined) {
+                    registry.gauge(preFilteredId, r.obj, new StrongReferenceGaugeFunction<>(r.obj, r.valueFunction));
+                }
 
-                        return rowId;
-                    });
+                return rowId;
+            });
 
-            Set<Meter.Id> newRows = idStream
-                    .collect(toSet());
+            Set<Meter.Id> newRows = idStream.collect(toSet());
 
             for (Meter.Id oldRow : oldRows) {
                 if (!newRows.contains(oldRow))
-                    registry.removeByPreFilterId(oldRow);
+                    registry.remove(oldRow);
             }
 
             return newRows;
@@ -89,8 +92,11 @@ public class MultiGauge {
     }
 
     public static class Row<T> {
+
         private final Tags uniqueTags;
+
         private final T obj;
+
         private final ToDoubleFunction<T> valueFunction;
 
         private Row(Tags uniqueTags, T obj, ToDoubleFunction<T> valueFunction) {
@@ -107,33 +113,35 @@ public class MultiGauge {
             return new Row<>(uniqueTags, number, Number::doubleValue);
         }
 
-        public static Row<Supplier<Number>> of(Tags uniqueTags, Supplier<Number> valueFunction) {
+        public static <T extends Number> Row<Supplier<T>> of(Tags uniqueTags, Supplier<T> valueFunction) {
             return new Row<>(uniqueTags, valueFunction, f -> {
                 Number value = valueFunction.get();
                 return value == null ? Double.NaN : value.doubleValue();
             });
         }
+
     }
 
     /**
      * Fluent builder for multi-gauges.
      */
     public static class Builder {
+
         private final String name;
+
         private Tags tags = Tags.empty();
 
-        @Nullable
-        private String description;
+        private @Nullable String description;
 
-        @Nullable
-        private String baseUnit;
+        private @Nullable String baseUnit;
 
         private Builder(String name) {
             this.name = name;
         }
 
         /**
-         * @param tags Must be an even number of arguments representing key/value pairs of tags.
+         * @param tags Must be an even number of arguments representing key/value pairs of
+         * tags.
          * @return The gauge builder with added tags.
          */
         public Builder tags(String... tags) {
@@ -150,7 +158,7 @@ public class MultiGauge {
         }
 
         /**
-         * @param key   The tag key.
+         * @param key The tag key.
          * @param value The tag value.
          * @return The gauge builder with a single added tag.
          */
@@ -180,5 +188,7 @@ public class MultiGauge {
         public MultiGauge register(MeterRegistry registry) {
             return new MultiGauge(registry, new Meter.Id(name, tags, baseUnit, description, Meter.Type.GAUGE, null));
         }
+
     }
+
 }

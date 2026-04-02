@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,33 +17,43 @@ package io.micrometer.core.instrument.binder.cache;
 
 import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.binder.BaseUnits;
-import io.micrometer.core.lang.NonNullApi;
-import io.micrometer.core.lang.NonNullFields;
 import net.sf.ehcache.Ehcache;
 import net.sf.ehcache.statistics.StatisticsGateway;
+import org.jspecify.annotations.Nullable;
+
+import java.util.function.Function;
+import java.util.function.ToLongFunction;
 
 /**
- * Collect metrics on EhCache caches, including detailed metrics on transactions and storage space.
+ * Collect metrics on EhCache caches, including detailed metrics on transactions and
+ * storage space.
  *
  * @author Jon Schneider
  */
-@NonNullApi
-@NonNullFields
-public class EhCache2Metrics extends CacheMeterBinder {
-    private final StatisticsGateway stats;
+public class EhCache2Metrics extends CacheMeterBinder<Ehcache> {
+
+    private static final String DESCRIPTION_CACHE_PUTS_ADDED = "Cache puts (added or updated)";
+
+    private static final String DESCRIPTION_CACHE_MISSES = "The number of times cache lookup methods have not returned a value, due to expiry or because the key was not found";
+
+    private static final String DESCRIPTION_CACHE_XA_COMMITS = "The number of transaction commits";
+
+    private static final String DESCRIPTION_CACHE_XA_ROLLBACKS = "The number of transaction rollbacks";
+
+    private static final String DESCRIPTION_CACHE_XA_RECOVERIES = "The number of transaction recoveries";
 
     public EhCache2Metrics(Ehcache cache, Iterable<Tag> tags) {
         super(cache, cache.getName(), tags);
-        this.stats = cache.getStatistics();
     }
 
     /**
      * Record metrics on an EhCache cache.
-     *
      * @param registry The registry to bind metrics to.
-     * @param cache    The cache to instrument.
-     * @param tags     Tags to apply to all recorded metrics. Must be an even number of arguments representing key/value pairs of tags.
-     * @return The instrumented cache, unchanged. The original cache is not wrapped or proxied in any way.
+     * @param cache The cache to instrument.
+     * @param tags Tags to apply to all recorded metrics. Must be an even number of
+     * arguments representing key/value pairs of tags.
+     * @return The instrumented cache, unchanged. The original cache is not wrapped or
+     * proxied in any way.
      */
     public static Ehcache monitor(MeterRegistry registry, Ehcache cache, String... tags) {
         return monitor(registry, cache, Tags.of(tags));
@@ -51,11 +61,11 @@ public class EhCache2Metrics extends CacheMeterBinder {
 
     /**
      * Record metrics on an EhCache cache.
-     *
      * @param registry The registry to bind metrics to.
-     * @param cache    The cache to instrument.
-     * @param tags     Tags to apply to all recorded metrics.
-     * @return The instrumented cache, unchanged. The original cache is not wrapped or proxied in any way.
+     * @param cache The cache to instrument.
+     * @param tags Tags to apply to all recorded metrics.
+     * @return The instrumented cache, unchanged. The original cache is not wrapped or
+     * proxied in any way.
      */
     public static Ehcache monitor(MeterRegistry registry, Ehcache cache, Iterable<Tag> tags) {
         new EhCache2Metrics(cache, tags).bindTo(registry);
@@ -63,135 +73,165 @@ public class EhCache2Metrics extends CacheMeterBinder {
     }
 
     @Override
-    protected Long size() {
-        return stats.getSize();
+    protected @Nullable Long size() {
+        return getOrDefault(StatisticsGateway::getSize, null);
     }
 
     @Override
     protected long hitCount() {
-        return stats.cacheHitCount();
+        return getOrDefault(StatisticsGateway::cacheHitCount, 0L);
     }
 
     @Override
-    protected Long missCount() {
-        return stats.cacheMissCount();
+    protected @Nullable Long missCount() {
+        return getOrDefault(StatisticsGateway::cacheMissCount, null);
     }
 
     @Override
-    protected Long evictionCount() {
-        return stats.cacheEvictedCount();
+    protected @Nullable Long evictionCount() {
+        return getOrDefault(StatisticsGateway::cacheEvictedCount, null);
     }
 
     @Override
     protected long putCount() {
-        return stats.cachePutCount();
+        return getOrDefault(StatisticsGateway::cachePutCount, 0L);
     }
 
     @Override
     protected void bindImplementationSpecificMetrics(MeterRegistry registry) {
+        StatisticsGateway stats = getStats();
+        if (stats == null) {
+            return;
+        }
         Gauge.builder("cache.remoteSize", stats, StatisticsGateway::getRemoteSize)
-                .tags(getTagsWithCacheName())
-                .description("The number of entries held remotely in this cache")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .description("The number of entries held remotely in this cache")
+            .register(registry);
 
         FunctionCounter.builder("cache.removals", stats, StatisticsGateway::cacheRemoveCount)
-                .tags(getTagsWithCacheName())
-                .description("Cache removals")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .description("Cache removals")
+            .register(registry);
 
         FunctionCounter.builder("cache.puts.added", stats, StatisticsGateway::cachePutAddedCount)
-                .tags(getTagsWithCacheName()).tags("result", "added")
-                .description("Cache puts resulting in a new key/value pair")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "added")
+            .description(DESCRIPTION_CACHE_PUTS_ADDED)
+            .register(registry);
 
         FunctionCounter.builder("cache.puts.added", stats, StatisticsGateway::cachePutUpdatedCount)
-                .tags(getTagsWithCacheName()).tags("result", "updated")
-                .description("Cache puts resulting in an updated value")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "updated")
+            .description(DESCRIPTION_CACHE_PUTS_ADDED)
+            .register(registry);
 
-        missMetrics(registry);
-        commitTransactionMetrics(registry);
-        rollbackTransactionMetrics(registry);
-        recoveryTransactionMetrics(registry);
+        missMetrics(stats, registry);
+        commitTransactionMetrics(stats, registry);
+        rollbackTransactionMetrics(stats, registry);
+        recoveryTransactionMetrics(stats, registry);
 
         Gauge.builder("cache.local.offheap.size", stats, StatisticsGateway::getLocalOffHeapSizeInBytes)
-                .tags(getTagsWithCacheName())
-                .description("Local off-heap size")
-                .baseUnit(BaseUnits.BYTES)
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .description("Local off-heap size")
+            .baseUnit(BaseUnits.BYTES)
+            .register(registry);
 
         Gauge.builder("cache.local.heap.size", stats, StatisticsGateway::getLocalHeapSizeInBytes)
-                .tags(getTagsWithCacheName())
-                .description("Local heap size")
-                .baseUnit(BaseUnits.BYTES)
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .description("Local heap size")
+            .baseUnit(BaseUnits.BYTES)
+            .register(registry);
 
         Gauge.builder("cache.local.disk.size", stats, StatisticsGateway::getLocalDiskSizeInBytes)
-                .tags(getTagsWithCacheName())
-                .description("Local disk size")
-                .baseUnit(BaseUnits.BYTES)
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .description("Local disk size")
+            .baseUnit(BaseUnits.BYTES)
+            .register(registry);
     }
 
-    private void missMetrics(MeterRegistry registry) {
+    private @Nullable StatisticsGateway getStats() {
+        Ehcache cache = getCache();
+        return cache != null ? cache.getStatistics() : null;
+    }
+
+    private void missMetrics(StatisticsGateway stats, MeterRegistry registry) {
         FunctionCounter.builder("cache.misses", stats, StatisticsGateway::cacheMissExpiredCount)
-                .tags(getTagsWithCacheName())
-                .tags("reason", "expired")
-                .description("The number of times cache lookup methods have not returned a value, due to expiry")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("reason", "expired")
+            .description(DESCRIPTION_CACHE_MISSES)
+            .register(registry);
 
         FunctionCounter.builder("cache.misses", stats, StatisticsGateway::cacheMissNotFoundCount)
-                .tags(getTagsWithCacheName())
-                .tags("reason", "notFound")
-                .description("The number of times cache lookup methods have not returned a value, because the key was not found")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("reason", "notFound")
+            .description(DESCRIPTION_CACHE_MISSES)
+            .register(registry);
     }
 
-    private void commitTransactionMetrics(MeterRegistry registry) {
+    private void commitTransactionMetrics(StatisticsGateway stats, MeterRegistry registry) {
         FunctionCounter.builder("cache.xa.commits", stats, StatisticsGateway::xaCommitReadOnlyCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "readOnly")
-                .description("Transaction commits that had a read-only result")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "readOnly")
+            .description(DESCRIPTION_CACHE_XA_COMMITS)
+            .register(registry);
 
         FunctionCounter.builder("cache.xa.commits", stats, StatisticsGateway::xaCommitExceptionCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "exception")
-                .description("Transaction commits that failed")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "exception")
+            .description(DESCRIPTION_CACHE_XA_COMMITS)
+            .register(registry);
 
         FunctionCounter.builder("cache.xa.commits", stats, StatisticsGateway::xaCommitCommittedCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "committed")
-                .description("Transaction commits that failed")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "committed")
+            .description(DESCRIPTION_CACHE_XA_COMMITS)
+            .register(registry);
     }
 
-    private void rollbackTransactionMetrics(MeterRegistry registry) {
+    private void rollbackTransactionMetrics(StatisticsGateway stats, MeterRegistry registry) {
         FunctionCounter.builder("cache.xa.rollbacks", stats, StatisticsGateway::xaRollbackExceptionCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "exception")
-                .description("Transaction rollbacks that failed")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "exception")
+            .description(DESCRIPTION_CACHE_XA_ROLLBACKS)
+            .register(registry);
 
         FunctionCounter.builder("cache.xa.rollbacks", stats, StatisticsGateway::xaRollbackSuccessCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "success")
-                .description("Transaction rollbacks that failed")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "success")
+            .description(DESCRIPTION_CACHE_XA_ROLLBACKS)
+            .register(registry);
     }
 
-    private void recoveryTransactionMetrics(MeterRegistry registry) {
+    private void recoveryTransactionMetrics(StatisticsGateway stats, MeterRegistry registry) {
         FunctionCounter.builder("cache.xa.recoveries", stats, StatisticsGateway::xaRecoveryNothingCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "nothing")
-                .description("Recovery transactions that recovered nothing")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "nothing")
+            .description(DESCRIPTION_CACHE_XA_RECOVERIES)
+            .register(registry);
 
         FunctionCounter.builder("cache.xa.recoveries", stats, StatisticsGateway::xaRecoveryRecoveredCount)
-                .tags(getTagsWithCacheName())
-                .tags("result", "success")
-                .description("Successful recovery transaction")
-                .register(registry);
+            .tags(getTagsWithCacheName())
+            .tags("result", "success")
+            .description(DESCRIPTION_CACHE_XA_RECOVERIES)
+            .register(registry);
     }
+
+    private @Nullable Long getOrDefault(Function<StatisticsGateway, Long> function, @Nullable Long defaultValue) {
+        StatisticsGateway ref = getStats();
+        if (ref != null) {
+            return function.apply(ref);
+        }
+
+        return defaultValue;
+    }
+
+    private long getOrDefault(ToLongFunction<StatisticsGateway> function, long defaultValue) {
+        StatisticsGateway ref = getStats();
+        if (ref != null) {
+            return function.applyAsLong(ref);
+        }
+
+        return defaultValue;
+    }
+
 }

@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,14 +16,8 @@
 package io.micrometer.humio;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
-import io.micrometer.core.instrument.FunctionCounter;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.Measurement;
-import io.micrometer.core.instrument.Meter;
-import io.micrometer.core.instrument.MockClock;
-import io.micrometer.core.instrument.Statistic;
-import io.micrometer.core.instrument.Tags;
-import io.micrometer.core.instrument.TimeGauge;
+import io.micrometer.core.instrument.*;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import ru.lanwen.wiremock.ext.WiremockResolver;
@@ -49,7 +43,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class HumioMeterRegistryTest {
 
     private final HumioConfig config = HumioConfig.DEFAULT;
+
     private final MockClock clock = new MockClock();
+
     private final HumioMeterRegistry meterRegistry = new HumioMeterRegistry(config, clock);
 
     @Test
@@ -59,8 +55,8 @@ class HumioMeterRegistryTest {
 
         server.stubFor(any(anyUrl()));
         registry.publish();
-        server.verify(postRequestedFor(urlMatching("/api/v1/ingest/humio-structured"))
-                .withRequestBody(equalTo("[{\"events\": [{\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"attributes\":{\"name\":\"my_timer\",\"count\":0,\"sum\":0,\"avg\":0,\"max\":0,\"status\":\"success\"}}]}]")));
+        server.verify(postRequestedFor(urlMatching("/api/v1/ingest/humio-structured")).withRequestBody(equalTo(
+                "[{\"events\": [{\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"attributes\":{\"name\":\"my_timer\",\"count\":0,\"sum\":0,\"avg\":0,\"max\":0,\"status\":\"success\"}}]}]")));
     }
 
     @Test
@@ -71,13 +67,13 @@ class HumioMeterRegistryTest {
         server.stubFor(any(anyUrl()));
         registry.publish();
         server.verify(postRequestedFor(urlMatching("/api/v1/ingest/humio-structured"))
-                .withRequestBody(containing("\"tags\":{\"name\": \"micrometer\"}")));
+            .withRequestBody(containing("\"tags\":{\"name\": \"micrometer\"}")));
     }
 
     @Test
     void writeGauge() {
         meterRegistry.gauge("my.gauge", 1d);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        Gauge gauge = meterRegistry.get("my.gauge").gauge();
         assertThat(createBatch().writeGauge(gauge)).isNotNull();
     }
 
@@ -88,21 +84,21 @@ class HumioMeterRegistryTest {
     @Test
     void writeGaugeShouldDropNanValue() {
         meterRegistry.gauge("my.gauge", Double.NaN);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        Gauge gauge = meterRegistry.get("my.gauge").gauge();
         assertThat(createBatch().writeGauge(gauge)).isNull();
     }
 
     @Test
     void writeGaugeShouldDropPositiveInfiniteValue() {
         meterRegistry.gauge("my.gauge", Double.POSITIVE_INFINITY);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        Gauge gauge = meterRegistry.get("my.gauge").gauge();
         assertThat(createBatch().writeGauge(gauge)).isNull();
     }
 
     @Test
     void writeGaugeShouldDropNegativeInfiniteValue() {
         meterRegistry.gauge("my.gauge", Double.NEGATIVE_INFINITY);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        Gauge gauge = meterRegistry.get("my.gauge").gauge();
         assertThat(createBatch().writeGauge(gauge)).isNull();
     }
 
@@ -110,7 +106,7 @@ class HumioMeterRegistryTest {
     void writeTimeGauge() {
         AtomicReference<Double> obj = new AtomicReference<>(1d);
         meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        TimeGauge timeGauge = meterRegistry.get("my.timeGauge").timeGauge();
         assertThat(createBatch().writeGauge(timeGauge)).isNotNull();
     }
 
@@ -118,7 +114,7 @@ class HumioMeterRegistryTest {
     void writeTimeGaugeShouldDropNanValue() {
         AtomicReference<Double> obj = new AtomicReference<>(Double.NaN);
         meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        TimeGauge timeGauge = meterRegistry.get("my.timeGauge").timeGauge();
         assertThat(createBatch().writeGauge(timeGauge)).isNull();
     }
 
@@ -126,7 +122,7 @@ class HumioMeterRegistryTest {
     void writeTimeGaugeShouldDropPositiveInfiniteValue() {
         AtomicReference<Double> obj = new AtomicReference<>(Double.POSITIVE_INFINITY);
         meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        TimeGauge timeGauge = meterRegistry.get("my.timeGauge").timeGauge();
         assertThat(createBatch().writeGauge(timeGauge)).isNull();
     }
 
@@ -134,7 +130,7 @@ class HumioMeterRegistryTest {
     void writeTimeGaugeShouldDropNegativeInfiniteValue() {
         AtomicReference<Double> obj = new AtomicReference<>(Double.NEGATIVE_INFINITY);
         meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        TimeGauge timeGauge = meterRegistry.get("my.timeGauge").timeGauge();
         assertThat(createBatch().writeGauge(timeGauge)).isNull();
     }
 
@@ -147,14 +143,16 @@ class HumioMeterRegistryTest {
 
     @Test
     void writeFunctionCounterShouldDropPositiveInfiniteValue() {
-        FunctionCounter counter = FunctionCounter.builder("myCounter", Double.POSITIVE_INFINITY, Number::doubleValue).register(meterRegistry);
+        FunctionCounter counter = FunctionCounter.builder("myCounter", Double.POSITIVE_INFINITY, Number::doubleValue)
+            .register(meterRegistry);
         clock.add(config.step());
         assertThat(createBatch().writeFunctionCounter(counter)).isNull();
     }
 
     @Test
     void writeFunctionCounterShouldDropNegativeInfiniteValue() {
-        FunctionCounter counter = FunctionCounter.builder("myCounter", Double.NEGATIVE_INFINITY, Number::doubleValue).register(meterRegistry);
+        FunctionCounter counter = FunctionCounter.builder("myCounter", Double.NEGATIVE_INFINITY, Number::doubleValue)
+            .register(meterRegistry);
         clock.add(config.step());
         assertThat(createBatch().writeFunctionCounter(counter)).isNull();
     }
@@ -176,16 +174,17 @@ class HumioMeterRegistryTest {
         Measurement measurement3 = new Measurement(() -> Double.NaN, Statistic.VALUE);
         Measurement measurement4 = new Measurement(() -> 1d, Statistic.VALUE);
         Measurement measurement5 = new Measurement(() -> 2d, Statistic.VALUE);
-        List<Measurement> measurements = Arrays.asList(measurement1, measurement2, measurement3, measurement4, measurement5);
+        List<Measurement> measurements = Arrays.asList(measurement1, measurement2, measurement3, measurement4,
+                measurement5);
         Meter meter = Meter.builder("my.meter", Meter.Type.GAUGE, measurements).register(this.meterRegistry);
-        assertThat(createBatch().writeMeter(meter))
-                .isEqualTo("{\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"attributes\":{\"name\":\"my_meter\",\"value\":1,\"value\":2}}");
+        assertThat(createBatch().writeMeter(meter)).isEqualTo(
+                "{\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"attributes\":{\"name\":\"my_meter\",\"value\":1,\"value\":2}}");
     }
 
     private HumioMeterRegistry humioMeterRegistry(WireMockServer server, String... tags) {
         return new HumioMeterRegistry(new HumioConfig() {
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -204,4 +203,5 @@ class HumioMeterRegistryTest {
             }
         }, clock);
     }
+
 }

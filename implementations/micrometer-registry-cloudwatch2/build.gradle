@@ -1,7 +1,11 @@
-dependencies {
-    compile project(':micrometer-core')
-    compile 'org.slf4j:slf4j-api:1.7.+'
-    compile 'software.amazon.awssdk:cloudwatch:latest.release'
+description = 'MeterRegistry implementation for publishing to CloudWatch using the AWS SDK v2.'
 
-    testCompile project(':micrometer-test')
+dependencies {
+    api project(':micrometer-core')
+
+    api libs.cloudwatch2
+    implementation libs.slf4jApi
+
+    testImplementation project(':micrometer-test')
+    testImplementation libs.mockitoCore5
 }

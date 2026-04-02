@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,29 +19,36 @@ import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Statistic;
 import io.micrometer.core.instrument.config.NamingConvention;
-import io.micrometer.core.lang.Nullable;
-import org.pcollections.HashTreePMap;
-import org.pcollections.PMap;
+import org.jspecify.annotations.Nullable;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class SysdigStatsdLineBuilder extends FlavorStatsdLineBuilder {
-    private final Object tagsLock = new Object();
-    @SuppressWarnings({"NullableProblems", "unused"})
+
+    private final Object conventionTagsLock = new Object();
+
     private volatile NamingConvention namingConvention;
-    @SuppressWarnings("NullableProblems")
+
     private volatile String name;
-    @Nullable
-    private volatile String conventionTags;
-    @SuppressWarnings("NullableProblems")
+
+    private volatile @Nullable String conventionTags;
+
     private volatile String tagsNoStat;
-    private volatile PMap<Statistic, String> tags = HashTreePMap.empty();
+
+    private final ConcurrentMap<Statistic, String> tags = new ConcurrentHashMap<>();
 
     private static final Pattern NAME_WHITELIST = Pattern.compile("[^\\w._]");
 
     public SysdigStatsdLineBuilder(Meter.Id id, MeterRegistry.Config config) {
         super(id, config);
+
+        this.namingConvention = config.namingConvention();
+        this.name = createName(namingConvention);
+        this.conventionTags = createConventionTags(namingConvention);
+        this.tagsNoStat = createTagsNoStat(conventionTags);
     }
 
     @Override
@@ -53,16 +60,29 @@ public class SysdigStatsdLineBuilder extends FlavorStatsdLineBuilder {
     private void updateIfNamingConventionChanged() {
         NamingConvention next = config.namingConvention();
         if (this.namingConvention != next) {
-            this.name = sanitize(next.name(id.getName(), id.getType(), id.getBaseUnit()));
-            this.tags = HashTreePMap.empty();
-            this.conventionTags = id.getTagsAsIterable().iterator().hasNext() ?
-                    id.getConventionTags(next).stream()
-                            .map(t -> sanitize(t.getKey()) + "=" + sanitize(t.getValue()))
-                            .collect(Collectors.joining(","))
-                    : null;
-            this.tagsNoStat = tags(null, conventionTags, "=", "#");
+            this.name = createName(next);
+            synchronized (conventionTagsLock) {
+                this.tags.clear();
+                this.conventionTags = createConventionTags(next);
+            }
+            this.tagsNoStat = createTagsNoStat(conventionTags);
             this.namingConvention = next;
         }
+    }
+
+    private @Nullable String createConventionTags(NamingConvention namingConvention) {
+        return id.getTagsAsIterable().iterator().hasNext() ? id.getConventionTags(namingConvention)
+            .stream()
+            .map(t -> sanitize(t.getKey()) + "=" + sanitize(t.getValue()))
+            .collect(Collectors.joining(",")) : null;
+    }
+
+    private String createName(NamingConvention namingConvention) {
+        return sanitize(namingConvention.name(id.getName(), id.getType(), id.getBaseUnit()));
+    }
+
+    private String createTagsNoStat(@Nullable String conventionTags) {
+        return tags(null, conventionTags, "=", "#");
     }
 
     private static String sanitize(String name) {
@@ -73,20 +93,13 @@ public class SysdigStatsdLineBuilder extends FlavorStatsdLineBuilder {
         if (stat == null) {
             return tagsNoStat;
         }
-
-        String tagString = tags.get(stat);
-        if (tagString != null)
-            return tagString;
-
-        synchronized (tagsLock) {
-            tagString = tags.get(stat);
-            if (tagString != null) {
-                return tagString;
-            }
-
-            tagString = tags(stat, conventionTags, "=", "#");
-            tags = tags.plus(stat, tagString);
-            return tagString;
+        String tags = this.tags.get(stat);
+        if (tags != null) {
+            return tags;
+        }
+        synchronized (conventionTagsLock) {
+            return this.tags.computeIfAbsent(stat, (key) -> tags(stat, conventionTags, "=", "#"));
         }
     }
+
 }

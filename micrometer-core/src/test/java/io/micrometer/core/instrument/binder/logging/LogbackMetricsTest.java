@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,17 +18,12 @@ package io.micrometer.core.instrument.binder.logging;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
-
 import io.micrometer.core.Issue;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Meter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.MockClock;
+import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.cumulative.CumulativeCounter;
 import io.micrometer.core.instrument.simple.SimpleConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import io.micrometer.core.lang.NonNullApi;
-
+import org.jspecify.annotations.NullMarked;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,14 +33,19 @@ import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LogbackMetricsTest {
+
     private MeterRegistry registry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, new MockClock());
+
     private Logger logger = (Logger) LoggerFactory.getLogger("foo");
+
     LogbackMetrics logbackMetrics;
 
     @BeforeEach
     void bindLogbackMetrics() {
+        // tag::setup[]
         logbackMetrics = new LogbackMetrics();
         logbackMetrics.bindTo(registry);
+        // end::setup[]
     }
 
     @AfterEach
@@ -57,16 +57,18 @@ class LogbackMetricsTest {
 
     @Test
     void logbackLevelMetrics() {
-        assertThat(registry.get("logback.events").counter().count()).isEqualTo(0.0);
+        assertThat(registry.get("logback.events").functionCounter().count()).isEqualTo(0.0);
 
+        // tag::example[]
         logger.setLevel(Level.INFO);
 
         logger.warn("warn");
         logger.error("error");
         logger.debug("debug"); // shouldn't record a metric
 
-        assertThat(registry.get("logback.events").tags("level", "warn").counter().count()).isEqualTo(1.0);
-        assertThat(registry.get("logback.events").tags("level", "debug").counter().count()).isEqualTo(0.0);
+        assertThat(registry.get("logback.events").tags("level", "warn").functionCounter().count()).isEqualTo(1.0);
+        assertThat(registry.get("logback.events").tags("level", "debug").functionCounter().count()).isEqualTo(0.0);
+        // end::example[]
     }
 
     @Issue("#183")
@@ -74,17 +76,18 @@ class LogbackMetricsTest {
     void isLevelEnabledDoesntContributeToCounts() {
         logger.isErrorEnabled();
 
-        assertThat(registry.get("logback.events").tags("level", "error").counter().count()).isEqualTo(0.0);
+        assertThat(registry.get("logback.events").tags("level", "error").functionCounter().count()).isEqualTo(0.0);
     }
 
-    @Issue("#411")
+    @Issue("#411, #3623")
     @Test
-    void ignoringMetricsInsideCounters() {
+    void ignoringLogMetricsInsideCounters() {
         registry = new LoggingCounterMeterRegistry();
         try (LogbackMetrics logbackMetrics = new LogbackMetrics()) {
             logbackMetrics.bindTo(registry);
-            registry.counter("my.counter").increment();
+            LoggerFactory.getLogger("test").info("This should be counted once");
         }
+        assertThat(registry.get("logback.events").tags("level", "info").functionCounter().count()).isOne();
     }
 
     @Issue("#421")
@@ -114,31 +117,27 @@ class LogbackMetricsTest {
         assertThat(loggerContext.getTurboFilterList()).hasSize(1);
     }
 
-    @Issue("#2270")
     @Test
-    void resetIgnoreMetricsWhenRunnableThrows() {
-        Counter infoLogCounter = registry.get("logback.events").tag("level", "info").counter();
-        logger.info("hi");
-        assertThat(infoLogCounter.count()).isEqualTo(1);
-        try {
-            LogbackMetrics.ignoreMetrics(() -> {
-                throw new RuntimeException();
-            });
-        } catch (RuntimeException ignore) {
-        }
-        logger.info("hi");
-        assertThat(infoLogCounter.count()).isEqualTo(2);
+    @Issue("#4404")
+    void slf4j2FluentApiIncrementsCounter() {
+        org.slf4j.Logger logger = LoggerFactory.getLogger("test");
+        logger.atWarn().setMessage("test warn log with fluent builder").log();
+
+        assertThat(registry.get("logback.events").tags("level", "warn").functionCounter().count()).isEqualTo(1.0);
     }
 
-    @NonNullApi
+    @NullMarked
     private static class LoggingCounterMeterRegistry extends SimpleMeterRegistry {
+
         @Override
         protected Counter newCounter(Meter.Id id) {
             return new LoggingCounter(id);
         }
+
     }
 
     private static class LoggingCounter extends CumulativeCounter {
+
         org.slf4j.Logger logger = LoggerFactory.getLogger(LoggingCounter.class);
 
         LoggingCounter(Id id) {
@@ -147,10 +146,10 @@ class LogbackMetricsTest {
 
         @Override
         public void increment() {
-            LogbackMetrics.ignoreMetrics(() -> {
-                logger.info("beep");
-                super.increment();
-            });
+            logger.info("beep"); // this is necessary to test gh-3623
+            super.increment();
         }
+
     }
+
 }

@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,22 +20,26 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Statistic;
 import io.micrometer.core.instrument.config.NamingConvention;
 import io.micrometer.core.instrument.util.HierarchicalNameMapper;
-import io.micrometer.core.lang.Nullable;
-import org.pcollections.HashTreePMap;
-import org.pcollections.PMap;
+import org.jspecify.annotations.Nullable;
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class EtsyStatsdLineBuilder extends FlavorStatsdLineBuilder {
+
     private final HierarchicalNameMapper nameMapper;
-    private final Object namesLock = new Object();
-    @SuppressWarnings({"NullableProblems", "unused"})
+
     private volatile NamingConvention namingConvention;
-    @Nullable
-    private volatile String nameNoStat;
-    private volatile PMap<Statistic, String> names = HashTreePMap.empty();
+
+    private volatile @Nullable String nameNoStat;
+
+    private final ConcurrentMap<Statistic, String> names = new ConcurrentHashMap<>();
 
     public EtsyStatsdLineBuilder(Meter.Id id, MeterRegistry.Config config, HierarchicalNameMapper nameMapper) {
         super(id, config);
         this.nameMapper = nameMapper;
+        this.namingConvention = config.namingConvention();
+        this.nameNoStat = null;
     }
 
     @Override
@@ -47,9 +51,9 @@ public class EtsyStatsdLineBuilder extends FlavorStatsdLineBuilder {
     private void updateIfNamingConventionChanged() {
         NamingConvention next = config.namingConvention();
         if (this.namingConvention != next) {
-            this.names = HashTreePMap.empty();
-            this.nameNoStat = null;
             this.namingConvention = next;
+            this.nameNoStat = null;
+            this.names.clear();
         }
     }
 
@@ -58,28 +62,15 @@ public class EtsyStatsdLineBuilder extends FlavorStatsdLineBuilder {
             if (this.nameNoStat == null) {
                 this.nameNoStat = etsyName(null);
             }
-            //noinspection ConstantConditions
+            // noinspection ConstantConditions
             return nameNoStat;
         }
-
-        String nameString = names.get(stat);
-        if (nameString != null)
-            return nameString;
-
-        synchronized (namesLock) {
-            nameString = names.get(stat);
-            if (nameString != null) {
-                return nameString;
-            }
-
-            nameString = etsyName(stat);
-            names = names.plus(stat, nameString);
-            return nameString;
-        }
+        return names.computeIfAbsent(stat, this::etsyName);
     }
 
     private String etsyName(@Nullable Statistic stat) {
         return nameMapper.toHierarchicalName(stat != null ? id.withTag(stat) : id, config.namingConvention())
-                .replace(':', '_');
+            .replace(':', '_');
     }
+
 }

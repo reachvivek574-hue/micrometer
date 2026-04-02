@@ -1,6 +1,12 @@
 dependencies {
-    compile project(':micrometer-core')
-    compile 'org.slf4j:slf4j-api:1.7.+'
+    api project(':micrometer-core')
 
-    testCompile project(':micrometer-test')
+    implementation libs.slf4jApi
+
+    testImplementation project(':micrometer-test')
+    // TODO: upgrade when we figure out how to unbreak things due to this change: https://github.com/testcontainers/testcontainers-java/pull/5099
+    testImplementation 'org.testcontainers:elasticsearch:1.16.3'
+    testImplementation libs.testcontainers.junitJupiter
+    testImplementation libs.jsonPath
+    testImplementation libs.logback12
 }

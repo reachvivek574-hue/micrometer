@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,41 +18,91 @@ package io.micrometer.core.instrument.distribution;
 import io.micrometer.core.instrument.Clock;
 
 import java.io.PrintStream;
-import java.util.Arrays;
 import java.util.Locale;
 import java.util.NavigableSet;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
  * A histogram implementation that does not support precomputed percentiles but supports
- * aggregable percentile histograms and SLA boundaries. There is no need for a high dynamic range
- * histogram and its more expensive memory footprint if all we are interested in is fixed histogram counts.
+ * aggregable percentile histograms and SLO boundaries. There is no need for a high
+ * dynamic range histogram and its more expensive memory footprint if all we are
+ * interested in is fixed histogram counts.
  *
  * @author Jon Schneider
  * @since 1.0.3
  */
-public class TimeWindowFixedBoundaryHistogram
-        extends AbstractTimeWindowHistogram<TimeWindowFixedBoundaryHistogram.FixedBoundaryHistogram, Void> {
-    private final long[] buckets;
+public class TimeWindowFixedBoundaryHistogram extends AbstractTimeWindowHistogram<FixedBoundaryHistogram, Void> {
 
-    public TimeWindowFixedBoundaryHistogram(Clock clock, DistributionStatisticConfig config, boolean supportsAggregablePercentiles) {
-        super(clock, config, FixedBoundaryHistogram.class, supportsAggregablePercentiles);
+    private final double[] buckets;
 
-        NavigableSet<Long> histogramBuckets = distributionStatisticConfig.getHistogramBuckets(supportsAggregablePercentiles);
+    private final boolean isCumulativeBucketCounts;
 
-        Boolean percentileHistogram = distributionStatisticConfig.isPercentileHistogram();
-        if (percentileHistogram != null && percentileHistogram) {
-            histogramBuckets.addAll(PercentileHistogramBuckets.buckets(distributionStatisticConfig));
+    /**
+     * Create a {@code TimeWindowFixedBoundaryHistogram} instance with cumulative bucket
+     * counts and buckets based on the {@link DistributionStatisticConfig config} and
+     * {@code supportsAggregablePercentiles}.
+     * @param clock clock
+     * @param config distribution statistic configuration
+     * @param supportsAggregablePercentiles whether the backend supports aggregable
+     * percentiles
+     * @see PercentileHistogramBuckets
+     */
+    public TimeWindowFixedBoundaryHistogram(Clock clock, DistributionStatisticConfig config,
+            boolean supportsAggregablePercentiles) {
+        this(clock, config, supportsAggregablePercentiles, true);
+    }
+
+    /**
+     * Create a {@code TimeWindowFixedBoundaryHistogram} instance with buckets based on
+     * the {@link DistributionStatisticConfig config} and
+     * {@code supportsAggregablePercentiles}.
+     * @param clock clock
+     * @param config distribution statistic configuration
+     * @param supportsAggregablePercentiles whether the backend supports aggregable
+     * percentiles
+     * @param isCumulativeBucketCounts whether to use cumulative bucket counts
+     * @since 1.9.0
+     * @see PercentileHistogramBuckets
+     */
+    public TimeWindowFixedBoundaryHistogram(Clock clock, DistributionStatisticConfig config,
+            boolean supportsAggregablePercentiles, boolean isCumulativeBucketCounts) {
+        this(clock, config, supportsAggregablePercentiles, isCumulativeBucketCounts, false);
+    }
+
+    /**
+     * Create a {@code TimeWindowFixedBoundaryHistogram} instance with buckets based on
+     * the {@link DistributionStatisticConfig config} and
+     * {@code supportsAggregablePercentiles}. This constructor allows for use cases that
+     * always need an infinity bucket in the histogram.
+     * @param clock clock
+     * @param config distribution statistic configuration
+     * @param supportsAggregablePercentiles whether the backend supports aggregable
+     * percentiles
+     * @param isCumulativeBucketCounts whether to use cumulative bucket counts
+     * @param includeInfinityBucket whether to always include an infinity bucket
+     * @since 1.13.11
+     * @see PercentileHistogramBuckets
+     */
+    protected TimeWindowFixedBoundaryHistogram(Clock clock, DistributionStatisticConfig config,
+            boolean supportsAggregablePercentiles, boolean isCumulativeBucketCounts, boolean includeInfinityBucket) {
+        super(clock, config, FixedBoundaryHistogram.class);
+
+        this.isCumulativeBucketCounts = isCumulativeBucketCounts;
+
+        NavigableSet<Double> histogramBuckets = distributionStatisticConfig
+            .getHistogramBuckets(supportsAggregablePercentiles);
+
+        if (includeInfinityBucket) {
+            histogramBuckets.add(Double.POSITIVE_INFINITY);
         }
 
-        this.buckets = histogramBuckets.stream().filter(Objects::nonNull).mapToLong(Long::longValue).toArray();
+        this.buckets = histogramBuckets.stream().filter(Objects::nonNull).mapToDouble(Double::doubleValue).toArray();
         initRingBuffer();
     }
 
     @Override
     FixedBoundaryHistogram newBucket() {
-        return new FixedBoundaryHistogram();
+        return new FixedBoundaryHistogram(this.buckets, isCumulativeBucketCounts);
     }
 
     @Override
@@ -90,77 +140,29 @@ public class TimeWindowFixedBoundaryHistogram
     }
 
     @Override
-    double countAtValue(long value) {
-        return currentHistogram().countAtValue(value);
+    CountAtBucket[] countsAtBuckets() {
+        return currentHistogram().getCountAtBuckets();
     }
 
     @Override
     void outputSummary(PrintStream printStream, double bucketScaling) {
         printStream.format("%14s %10s\n\n", "Bucket", "TotalCount");
 
-        String bucketFormatString = "%14.1f %10d\n";
-
+        FixedBoundaryHistogram currentHistogram = currentHistogram();
         for (int i = 0; i < buckets.length; i++) {
-            printStream.format(Locale.US, bucketFormatString,
-                    buckets[i] / bucketScaling,
-                    currentHistogram().values.get(i));
+            printStream.format(Locale.US, "%14.1f %10d\n", buckets[i] / bucketScaling, currentHistogram.values.get(i));
         }
 
         printStream.write('\n');
     }
 
-    class FixedBoundaryHistogram {
-        /**
-         * For recording efficiency, this is a normal histogram. We turn these values into
-         * cumulative counts only on calls to {@link #countAtValue(long)}.
-         */
-        final AtomicLongArray values;
-
-        FixedBoundaryHistogram() {
-            this.values = new AtomicLongArray(buckets.length);
-        }
-
-        long countAtValue(long value) {
-            int index = Arrays.binarySearch(buckets, value);
-            if (index < 0)
-                return 0;
-            long count = 0;
-            for (int i = 0; i <= index; i++)
-                count += values.get(i);
-            return count;
-        }
-
-        void reset() {
-            for (int i = 0; i < values.length(); i++) {
-               values.set(i, 0);
-
-            }
-        }
-
-        void record(long value) {
-            int index = leastLessThanOrEqualTo(value);
-            if (index > -1)
-                values.incrementAndGet(index);
-        }
-
-        /**
-         * The least bucket that is less than or equal to a sample.
-         */
-        int leastLessThanOrEqualTo(long key) {
-            int low = 0;
-            int high = buckets.length - 1;
-
-            while (low <= high) {
-                int mid = (low + high) >>> 1;
-                if (buckets[mid] < key)
-                    low = mid + 1;
-                else if (buckets[mid] > key)
-                    high = mid - 1;
-                else
-                    return mid; // exact match
-            }
-
-            return low < buckets.length ? low : -1;
-        }
+    /**
+     * Return buckets.
+     * @return buckets
+     * @since 1.9.0
+     */
+    protected double[] getBuckets() {
+        return this.buckets;
     }
+
 }

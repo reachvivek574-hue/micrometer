@@ -1,7 +1,11 @@
-dependencies {
-    compile project(':micrometer-core')
-    compile 'org.slf4j:slf4j-api:1.7.+'
-    compile 'com.wavefront:wavefront-sdk-java:latest.release'
+description = 'MeterRegistry implementation for Wavefront. This module is deprecated due to Wavefront\'s End of Life Announcement.'
 
-    testCompile project(':micrometer-test')
+dependencies {
+    api project(':micrometer-core')
+
+    api libs.wavefront
+    implementation libs.slf4jApi
+
+    testImplementation project(':micrometer-test')
+    testImplementation libs.mockitoCore5
 }

@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,7 +29,6 @@ import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.logging.LoggingMeterRegistry;
 import io.micrometer.core.instrument.logging.LoggingRegistryConfig;
-import io.micrometer.core.lang.Nullable;
 import io.micrometer.datadog.DatadogConfig;
 import io.micrometer.datadog.DatadogMeterRegistry;
 import io.micrometer.dynatrace.DynatraceConfig;
@@ -50,10 +49,8 @@ import io.micrometer.kairos.KairosConfig;
 import io.micrometer.kairos.KairosMeterRegistry;
 import io.micrometer.newrelic.NewRelicConfig;
 import io.micrometer.newrelic.NewRelicMeterRegistry;
-import io.micrometer.prometheus.PrometheusConfig;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
-import io.micrometer.signalfx.SignalFxConfig;
-import io.micrometer.signalfx.SignalFxMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.micrometer.stackdriver.StackdriverConfig;
 import io.micrometer.stackdriver.StackdriverMeterRegistry;
 import io.micrometer.statsd.StatsdConfig;
@@ -61,14 +58,19 @@ import io.micrometer.statsd.StatsdFlavor;
 import io.micrometer.statsd.StatsdMeterRegistry;
 import io.micrometer.wavefront.WavefrontConfig;
 import io.micrometer.wavefront.WavefrontMeterRegistry;
+import org.jspecify.annotations.Nullable;
 
 import java.io.*;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 public class SampleRegistries {
+
+    @SuppressWarnings("DoNotCallSuggester")
     public static MeterRegistry pickOne() {
-        throw new RuntimeException("Pick some other method on SampleRegistries to ship sample metrics to the system of your choice");
+        throw new RuntimeException(
+                "Pick some other method on SampleRegistries to ship sample metrics to the system of your choice");
     }
 
     public static AppOpticsMeterRegistry appOptics(String apiToken) {
@@ -84,17 +86,15 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
     }
 
     /**
-     * To use pushgateway instead:
-     * new PushGateway("localhost:9091").pushAdd(registry.getPrometheusRegistry(), "samples");
-     *
+     * To use pushgateway instead: new
+     * PushGateway("localhost:9091").pushAdd(registry.getPrometheusRegistry(), "samples");
      * @return A prometheus registry.
      */
     public static PrometheusMeterRegistry prometheus() {
@@ -105,8 +105,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         });
@@ -117,12 +116,13 @@ public class SampleRegistries {
                 String response = prometheusRegistry.scrape();
                 httpExchange.sendResponseHeaders(200, response.length());
                 OutputStream os = httpExchange.getResponseBody();
-                os.write(response.getBytes());
+                os.write(response.getBytes(StandardCharsets.UTF_8));
                 os.close();
             });
 
-            new Thread(server::start).run();
-        } catch (IOException e) {
+            new Thread(server::start).start();
+        }
+        catch (IOException e) {
             throw new RuntimeException(e);
         }
 
@@ -138,8 +138,7 @@ public class SampleRegistries {
 
             @SuppressWarnings("ConstantConditions")
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -163,8 +162,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         };
@@ -180,8 +178,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -195,8 +192,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
 
@@ -215,8 +211,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
 
@@ -235,8 +230,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
 
@@ -255,8 +249,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
 
@@ -275,8 +268,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -290,8 +282,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -305,8 +296,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -330,8 +320,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -355,28 +344,7 @@ public class SampleRegistries {
             }
 
             @Override
-            @Nullable
-            public String get(String k) {
-                return null;
-            }
-        }, Clock.SYSTEM);
-    }
-
-    public static SignalFxMeterRegistry signalFx(String accessToken) {
-        return new SignalFxMeterRegistry(new SignalFxConfig() {
-            @Override
-            public String accessToken() {
-                return accessToken;
-            }
-
-            @Override
-            public Duration step() {
-                return Duration.ofSeconds(10);
-            }
-
-            @Override
-            @Nullable
-            public String get(String k) {
+            public @Nullable String get(String k) {
                 return null;
             }
         }, Clock.SYSTEM);
@@ -389,7 +357,7 @@ public class SampleRegistries {
     public static WavefrontMeterRegistry wavefrontDirect(String apiToken) {
         return new WavefrontMeterRegistry(new WavefrontConfig() {
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -408,12 +376,31 @@ public class SampleRegistries {
     public static AzureMonitorMeterRegistry azure(String apiKey) {
         return new AzureMonitorMeterRegistry(new AzureMonitorConfig() {
             @Override
-            public String instrumentationKey() {
-                return apiKey;
+            public String connectionString() {
+                return String.format("InstrumentationKey=%s", apiKey);
             }
 
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
+                return null;
+            }
+
+            @Override
+            public Duration step() {
+                return Duration.ofSeconds(10);
+            }
+        }, Clock.SYSTEM);
+    }
+
+    public static AzureMonitorMeterRegistry azureWithConnectionString(String connectionString) {
+        return new AzureMonitorMeterRegistry(new AzureMonitorConfig() {
+            @Override
+            public String connectionString() {
+                return connectionString;
+            }
+
+            @Override
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -427,7 +414,7 @@ public class SampleRegistries {
     public static DynatraceMeterRegistry dynatrace(String apiToken, String uri) {
         return new DynatraceMeterRegistry(new DynatraceConfig() {
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -456,7 +443,7 @@ public class SampleRegistries {
     public static HumioMeterRegistry humio(String apiToken) {
         return new HumioMeterRegistry(new HumioConfig() {
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -475,7 +462,7 @@ public class SampleRegistries {
     public static KairosMeterRegistry kairos() {
         return new KairosMeterRegistry(new KairosConfig() {
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -492,36 +479,40 @@ public class SampleRegistries {
     }
 
     /**
-     * @param serviceAccountJson The fully qualified path on the local file system to a service account's JSON.
-     * @param projectId          The Google Cloud project id found on the dropdown at the top of the Google Cloud console.
-     * @see <a href="https://cloud.google.com/monitoring/docs/reference/libraries#setting_up_authentication">Google Cloud authentication</a>
+     * @param serviceAccountJson The fully qualified path on the local file system to a
+     * service account's JSON.
+     * @param projectId The Google Cloud project id found on the dropdown at the top of
+     * the Google Cloud console.
+     * @see <a href=
+     * "https://cloud.google.com/monitoring/docs/reference/libraries#setting_up_authentication">Google
+     * Cloud authentication</a>
      * @return A Stackdriver registry.
      */
     public static StackdriverMeterRegistry stackdriver(String serviceAccountJson, String projectId) {
         try (InputStream credentials = new FileInputStream(new File(serviceAccountJson))) {
-            return StackdriverMeterRegistry
-                    .builder(new StackdriverConfig() {
-                        @Override
-                        public String projectId() {
-                            return projectId;
-                        }
+            return StackdriverMeterRegistry.builder(new StackdriverConfig() {
+                @Override
+                public String projectId() {
+                    return projectId;
+                }
 
-                        @Override
-                        public String get(String key) {
-                            return null;
-                        }
+                @Override
+                public @Nullable String get(String key) {
+                    return null;
+                }
 
-                        @Override
-                        public Duration step() {
-                            return Duration.ofSeconds(10);
-                        }
-                    })
-                    .metricServiceSettings(() -> MetricServiceSettings.newBuilder()
-                            .setCredentialsProvider(FixedCredentialsProvider.create(ServiceAccountCredentials.fromStream(credentials)))
-                            .build()
-                    )
-                    .build();
-        } catch (IOException e) {
+                @Override
+                public Duration step() {
+                    return Duration.ofSeconds(10);
+                }
+            })
+                .metricServiceSettings(() -> MetricServiceSettings.newBuilder()
+                    .setCredentialsProvider(
+                            FixedCredentialsProvider.create(ServiceAccountCredentials.fromStream(credentials)))
+                    .build())
+                .build();
+        }
+        catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
@@ -529,7 +520,7 @@ public class SampleRegistries {
     public static LoggingMeterRegistry logging() {
         return new LoggingMeterRegistry(new LoggingRegistryConfig() {
             @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -539,4 +530,5 @@ public class SampleRegistries {
             }
         }, Clock.SYSTEM);
     }
+
 }

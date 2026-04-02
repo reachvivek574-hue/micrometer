@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,7 +19,7 @@ import com.codahale.metrics.MetricRegistry;
 import io.micrometer.core.Issue;
 import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.util.HierarchicalNameMapper;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Johnny Lim
  */
 class DropwizardMeterRegistryTest {
+
     private final MockClock clock = new MockClock();
 
     private final DropwizardConfig config = new DropwizardConfig() {
@@ -45,14 +46,13 @@ class DropwizardMeterRegistryTest {
         }
 
         @Override
-        @Nullable
-        public String get(String key) {
+        public @Nullable String get(String key) {
             return null;
         }
     };
 
-    private final DropwizardMeterRegistry registry = new DropwizardMeterRegistry(
-            config, new MetricRegistry(), HierarchicalNameMapper.DEFAULT, clock) {
+    private final DropwizardMeterRegistry registry = new DropwizardMeterRegistry(config, new MetricRegistry(),
+            HierarchicalNameMapper.DEFAULT, clock) {
         @Override
         protected Double nullGaugeValue() {
             return Double.NaN;
@@ -67,19 +67,23 @@ class DropwizardMeterRegistryTest {
 
     @Test
     void customMeasurementsThatDifferOnlyInTagValue() {
-        Meter.builder("my.custom", Meter.Type.GAUGE, Arrays.asList(
-                new Measurement(() -> 1.0, Statistic.COUNT),
-                new Measurement(() -> 2.0, Statistic.TOTAL)
-        )).register(registry);
+        Meter
+            .builder("my.custom", Meter.Type.GAUGE,
+                    Arrays.asList(new Measurement(() -> 1.0, Statistic.COUNT),
+                            new Measurement(() -> 2.0, Statistic.TOTAL)))
+            .register(registry);
     }
 
     @Issue("#370")
     @Test
-    void slasOnlyNoPercentileHistogram() {
-        DistributionSummary summary = DistributionSummary.builder("my.summary").sla(1, 2).register(registry);
+    void serviceLevelObjectivesOnlyNoPercentileHistogram() {
+        DistributionSummary summary = DistributionSummary.builder("my.summary")
+            .serviceLevelObjectives(1.0, 2)
+            .register(registry);
+
         summary.record(1);
 
-        Timer timer = Timer.builder("my.timer").sla(Duration.ofMillis(1)).register(registry);
+        Timer timer = Timer.builder("my.timer").serviceLevelObjectives(Duration.ofMillis(1)).register(registry);
         timer.record(1, TimeUnit.MILLISECONDS);
 
         Gauge summaryHist1 = registry.get("my.summary.histogram").tags("le", "1").gauge();
@@ -104,6 +108,15 @@ class DropwizardMeterRegistryTest {
         assertThat(registry.getDropwizardRegistry().getMeters()).hasSize(1);
         registry.remove(counter);
         assertThat(registry.getDropwizardRegistry().getMeters()).isEmpty();
+    }
+
+    @Issue("#2924")
+    @Test
+    void removeShouldWorkForLongTaskTimer() {
+        LongTaskTimer timer = LongTaskTimer.builder("foo").register(registry);
+        assertThat(registry.getDropwizardRegistry().getGauges()).hasSize(3);
+        registry.remove(timer);
+        assertThat(registry.getDropwizardRegistry().getGauges()).isEmpty();
     }
 
 }

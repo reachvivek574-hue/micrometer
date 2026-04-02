@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,26 +16,30 @@
 package io.micrometer.cloudwatch2;
 
 import io.micrometer.core.instrument.*;
+import io.micrometer.core.instrument.Statistic;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import software.amazon.awssdk.services.cloudwatch.model.Dimension;
-import software.amazon.awssdk.services.cloudwatch.model.MetricDatum;
-import software.amazon.awssdk.services.cloudwatch.model.StandardUnit;
+import software.amazon.awssdk.core.exception.AbortedException;
+import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient;
+import software.amazon.awssdk.services.cloudwatch.model.*;
 
+import java.net.SocketTimeoutException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static io.micrometer.core.instrument.Meter.Id;
 import static io.micrometer.core.instrument.Meter.Type;
 import static io.micrometer.core.instrument.Meter.Type.DISTRIBUTION_SUMMARY;
 import static io.micrometer.core.instrument.Meter.Type.TIMER;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 /**
@@ -44,10 +48,12 @@ import static org.mockito.Mockito.*;
  * @author Johnny Lim
  */
 class CloudWatchMeterRegistryTest {
+
     private static final String METER_NAME = "test";
+
     private final CloudWatchConfig config = new CloudWatchConfig() {
         @Override
-        public String get(String key) {
+        public @Nullable String get(String key) {
             return null;
         }
 
@@ -55,10 +61,19 @@ class CloudWatchMeterRegistryTest {
         public String namespace() {
             return "namespace";
         }
+
+        @Override
+        @SuppressWarnings("deprecation")
+        public Duration readTimeout() {
+            return Duration.ofSeconds(1);
+        }
     };
 
     private final MockClock clock = new MockClock();
-    private final CloudWatchMeterRegistry registry = spy(new CloudWatchMeterRegistry(config, clock, null));
+
+    private final CloudWatchMeterRegistry registry = spy(
+            new CloudWatchMeterRegistry(config, clock, mock(CloudWatchAsyncClient.class)));
+
     private CloudWatchMeterRegistry.Batch registryBatch = registry.new Batch();
 
     @Test
@@ -100,15 +115,18 @@ class CloudWatchMeterRegistryTest {
 
     @Test
     void batchFunctionCounterDataShouldClampInfiniteValues() {
-        FunctionCounter counter = FunctionCounter.builder("my.positive.infinity", Double.POSITIVE_INFINITY, Number::doubleValue).register(registry);
+        FunctionCounter counter = FunctionCounter
+            .builder("my.positive.infinity", Double.POSITIVE_INFINITY, Number::doubleValue)
+            .register(registry);
         clock.add(config.step());
         assertThat(registry.new Batch().functionCounterData(counter).findFirst().get().value())
-                .isEqualTo(1.174271e+108);
+            .isEqualTo(1.174271e+108);
 
-        counter = FunctionCounter.builder("my.negative.infinity", Double.NEGATIVE_INFINITY, Number::doubleValue).register(registry);
+        counter = FunctionCounter.builder("my.negative.infinity", Double.NEGATIVE_INFINITY, Number::doubleValue)
+            .register(registry);
         clock.add(config.step());
         assertThat(registry.new Batch().functionCounterData(counter).findFirst().get().value())
-                .isEqualTo(-1.174271e+108);
+            .isEqualTo(-1.174271e+108);
     }
 
     @Test
@@ -132,24 +150,25 @@ class CloudWatchMeterRegistryTest {
     @Test
     void writeShouldDropTagWithBlankValue() {
         registry.gauge("my.gauge", Tags.of("accepted", "foo").and("empty", ""), 1d);
-        assertThat(registry.metricData())
-                .hasSize(1)
-                .allSatisfy(datum -> assertThat(datum.dimensions()).hasSize(1).contains(
-                        Dimension.builder().name("accepted").value("foo").build()));
+        assertThat(registry.metricData()).hasSize(1)
+            .allSatisfy(datum -> assertThat(datum.dimensions()).hasSize(1)
+                .contains(Dimension.builder().name("accepted").value("foo").build()));
     }
 
     @Test
     void functionTimerData() {
-        FunctionTimer timer = FunctionTimer.builder("my.function.timer", 1d, Number::longValue, Number::doubleValue,
-                TimeUnit.MILLISECONDS).register(registry);
+        FunctionTimer timer = FunctionTimer
+            .builder("my.function.timer", 1d, Number::longValue, Number::doubleValue, TimeUnit.MILLISECONDS)
+            .register(registry);
         clock.add(config.step());
         assertThat(registry.new Batch().functionTimerData(timer)).hasSize(3);
     }
 
     @Test
     void functionTimerDataWhenSumIsNaNShouldReturnEmptyStream() {
-        FunctionTimer timer = FunctionTimer.builder("my.function.timer", Double.NaN, Number::longValue,
-                Number::doubleValue, TimeUnit.MILLISECONDS).register(registry);
+        FunctionTimer timer = FunctionTimer
+            .builder("my.function.timer", Double.NaN, Number::longValue, Number::doubleValue, TimeUnit.MILLISECONDS)
+            .register(registry);
         clock.add(config.step());
         assertThat(registry.new Batch().functionTimerData(timer)).isEmpty();
     }
@@ -233,7 +252,7 @@ class CloudWatchMeterRegistryTest {
     @Test
     void batchSizeShouldWorkOnMetricDatum() throws InterruptedException {
         List<Meter> meters = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < CloudWatchConfig.MAX_BATCH_SIZE; i++) {
             Timer timer = Timer.builder("timer." + i).register(this.registry);
             meters.add(timer);
         }
@@ -244,13 +263,73 @@ class CloudWatchMeterRegistryTest {
         ArgumentCaptor<List<MetricDatum>> argumentCaptor = ArgumentCaptor.forClass(List.class);
         verify(this.registry, times(2)).sendMetricData(argumentCaptor.capture());
         List<List<MetricDatum>> allValues = argumentCaptor.getAllValues();
-        assertThat(allValues.get(0)).hasSize(20);
-        assertThat(allValues.get(1)).hasSize(20);
+        assertThat(allValues.get(0)).hasSize(CloudWatchConfig.MAX_BATCH_SIZE);
+        assertThat(allValues.get(1)).hasSize(CloudWatchConfig.MAX_BATCH_SIZE);
     }
 
     @Test
     void batchToStandardUnitWhenUnitIsUnknownShouldReturnNone() {
         assertThat(this.registry.new Batch().toStandardUnit("unknownUnit")).isEqualTo(StandardUnit.NONE);
+    }
+
+    @Test
+    void putMetricDataShouldBeCalledOnPublish() {
+        CloudWatchAsyncClient client = mock(CloudWatchAsyncClient.class);
+        when(client.putMetricData(isA(PutMetricDataRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(PutMetricDataResponse.builder().build()));
+
+        CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, clock, client);
+        registry.counter("test").increment();
+        registry.publish();
+
+        verify(client).putMetricData(isA(PutMetricDataRequest.class));
+    }
+
+    @Test
+    void shouldHandleAbortedExceptionDuringPutMetricDataCallWithoutFailing() {
+        CloudWatchAsyncClient client = mock(CloudWatchAsyncClient.class);
+        CompletableFuture<PutMetricDataResponse> future = new CompletableFuture<>();
+        future.completeExceptionally(AbortedException.create("simulated"));
+        when(client.putMetricData(isA(PutMetricDataRequest.class))).thenReturn(future);
+
+        CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, clock, client);
+        registry.counter("test").increment();
+        registry.publish();
+
+        verify(client).putMetricData(isA(PutMetricDataRequest.class));
+    }
+
+    @Test
+    void shouldHandleExceptionsDuringPutMetricDataCallWithoutFailing() {
+        CloudWatchAsyncClient client = mock(CloudWatchAsyncClient.class);
+        CompletableFuture<PutMetricDataResponse> future = new CompletableFuture<>();
+        future.completeExceptionally(new SocketTimeoutException("simulated"));
+        when(client.putMetricData(isA(PutMetricDataRequest.class))).thenReturn(future);
+
+        CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, clock, client);
+        registry.counter("test").increment();
+        registry.publish();
+
+        verify(client).putMetricData(isA(PutMetricDataRequest.class));
+    }
+
+    @Test
+    void shouldHandleTimeoutsDuringPutMetricDataCallWithoutFailing() {
+        CloudWatchAsyncClient client = mock(CloudWatchAsyncClient.class);
+        Executor nonExecutingExecutor = new Executor() {
+            @Override
+            public void execute(Runnable command) {
+                // intentionally noop
+            }
+        };
+        when(client.putMetricData(isA(PutMetricDataRequest.class)))
+            .thenReturn(CompletableFuture.supplyAsync(() -> null, nonExecutingExecutor));
+
+        CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, clock, client);
+        registry.counter("test").increment();
+        registry.publish();
+
+        verify(client).putMetricData(isA(PutMetricDataRequest.class));
     }
 
     private Predicate<MetricDatum> hasAvgMetric(Id id) {
@@ -260,4 +339,5 @@ class CloudWatchMeterRegistryTest {
     private Predicate<MetricDatum> hasMaxMetric(Id id) {
         return e -> e.metricName().equals(id.getName().concat(".max"));
     }
+
 }

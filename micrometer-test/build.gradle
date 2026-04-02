@@ -1,13 +1,56 @@
+description = 'Test compatibility kit for extensions of Micrometer'
+
+// activemq-artemis requires Java 17 from 2.39.0
+compileTestJava {
+    if (!javaLanguageVersion.canCompileOrRun(17)) {
+        exclude 'io/micrometer/core/instrument/binder/jms/JmsInstrumentationTests.java'
+    }
+}
+
 dependencies {
-    compile project(':micrometer-core')
-    compile 'org.assertj:assertj-core:latest.release'
+    api project(':micrometer-core')
+    api project(':micrometer-observation')
+    api project(':micrometer-observation-test')
 
-    // JUnit 5
-    compile 'org.junit.jupiter:junit-jupiter:5.7.+'
+    api libs.assertj
 
-    compile 'ru.lanwen.wiremock:wiremock-junit5:latest.release'
-    compile 'com.github.tomakehurst:wiremock:latest.release'
-    compile 'org.mockito:mockito-core:latest.release'
+    implementation platform(libs.junitBom)
+    implementation(libs.junitJupiter)
+    implementation('org.junit.jupiter:junit-jupiter-engine')
 
-    testCompile 'org.jsr107.ri:cache-ri-impl:1.0.0'
+    api libs.wiremockJunit5
+    api libs.wiremock
+
+    implementation libs.awaitility
+
+    testImplementation project(':micrometer-observation-test')
+    testImplementation project(':micrometer-jakarta9')
+    testImplementation project(':micrometer-java11')
+
+    testImplementation libs.archunitJunit5
+
+    testImplementation libs.jsr107
+
+    // We have tests for the many features that are optional dependencies, so add
+    // them here just like a user would need to.
+    testImplementation libs.guava
+    testImplementation libs.caffeine
+    testImplementation libs.ehcache2
+    testImplementation libs.javax.cacheApi
+    testImplementation libs.jakarta.jmsApi
+    // hard-coded to last hazelcast version to support Java 11
+    testImplementation("com.hazelcast:hazelcast:5.3.8")
+    testImplementation libs.okhttp
+    testImplementation libs.httpcomponents.client
+    testImplementation libs.httpcomponents.async
+    testImplementation libs.httpcomponents.client5
+    testImplementation libs.activemqArtemisJunit5
+    testImplementation libs.activemqArtemisJakartaClient
+    testImplementation libs.jetty9Client
+    testImplementation libs.jetty9Server
+    testImplementation libs.jetty9Servlet
+    testImplementation libs.jersey2Server
+    testImplementation libs.jersey2TestFrameworkJdkHttp
+    // necessary for Jersey test framework
+    testRuntimeOnly libs.jersey2Hk2
 }

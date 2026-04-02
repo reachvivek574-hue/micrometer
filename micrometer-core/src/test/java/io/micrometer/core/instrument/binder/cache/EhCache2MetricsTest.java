@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2018 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,21 +20,17 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-
-import java.util.Random;
-
 import net.sf.ehcache.Cache;
 import net.sf.ehcache.CacheManager;
 import net.sf.ehcache.statistics.StatisticsGateway;
-
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link EhCache2Metrics}.
@@ -44,84 +40,93 @@ import static org.mockito.Mockito.when;
 class EhCache2MetricsTest extends AbstractCacheMetricsTest {
 
     private static CacheManager cacheManager;
-    private static Cache cache;
 
-    private EhCache2Metrics metrics = new EhCache2Metrics(cache, expectedTag);
+    @SuppressWarnings("NullAway.Init")
+    // tag::setup[]
+    static Cache cache;
+
+    EhCache2Metrics metrics = new EhCache2Metrics(cache, expectedTag);
+
+    // end::setup[]
 
     @Test
     void reportMetrics() {
+        // tag::register[]
         MeterRegistry registry = new SimpleMeterRegistry();
         metrics.bindTo(registry);
+        // end::register[]
 
         verifyCommonCacheMetrics(registry, metrics);
 
         StatisticsGateway stats = cache.getStatistics();
 
         Gauge remoteSize = fetch(registry, "cache.remoteSize").gauge();
-        assertThat(remoteSize.value()).isEqualTo(stats.getRemoteSize());
+        assertThat(remoteSize.value()).isEqualTo((double) stats.getRemoteSize());
 
         FunctionCounter cacheRemovals = fetch(registry, "cache.removals").functionCounter();
-        assertThat(cacheRemovals.count()).isEqualTo(stats.cacheRemoveCount());
+        assertThat(cacheRemovals.count()).isEqualTo((double) stats.cacheRemoveCount());
 
         String cacheAdded = "cache.puts.added";
         FunctionCounter putsAdded = fetch(registry, cacheAdded, Tags.of("result", "added")).functionCounter();
-        assertThat(putsAdded.count()).isEqualTo(stats.cachePutAddedCount());
+        assertThat(putsAdded.count()).isEqualTo((double) stats.cachePutAddedCount());
 
         FunctionCounter putsUpdated = fetch(registry, cacheAdded, Tags.of("result", "updated")).functionCounter();
-        assertThat(putsUpdated.count()).isEqualTo(stats.cachePutUpdatedCount());
+        assertThat(putsUpdated.count()).isEqualTo((double) stats.cachePutUpdatedCount());
 
         Gauge offHeapSize = fetch(registry, "cache.local.offheap.size").gauge();
-        assertThat(offHeapSize.value()).isEqualTo(stats.getLocalOffHeapSizeInBytes());
+        assertThat(offHeapSize.value()).isEqualTo((double) stats.getLocalOffHeapSizeInBytes());
 
         Gauge heapSize = fetch(registry, "cache.local.heap.size").gauge();
-        assertThat(heapSize.value()).isEqualTo(stats.getLocalHeapSizeInBytes());
+        assertThat(heapSize.value()).isEqualTo((double) stats.getLocalHeapSizeInBytes());
 
         Gauge diskSize = fetch(registry, "cache.local.disk.size").gauge();
-        assertThat(diskSize.value()).isEqualTo(stats.getLocalDiskSizeInBytes());
+        assertThat(diskSize.value()).isEqualTo((double) stats.getLocalDiskSizeInBytes());
 
         // miss metrics
         String misses = "cache.misses";
         FunctionCounter expiredMisses = fetch(registry, misses, Tags.of("reason", "expired")).functionCounter();
-        assertThat(expiredMisses.count()).isEqualTo(stats.cacheMissExpiredCount());
+        assertThat(expiredMisses.count()).isEqualTo((double) stats.cacheMissExpiredCount());
 
         FunctionCounter notFoundMisses = fetch(registry, misses, Tags.of("reason", "notFound")).functionCounter();
-        assertThat(notFoundMisses.count()).isEqualTo(stats.cacheMissNotFoundCount());
+        assertThat(notFoundMisses.count()).isEqualTo((double) stats.cacheMissNotFoundCount());
 
         // commit transaction metrics
         String xaCommits = "cache.xa.commits";
         FunctionCounter readOnlyCommits = fetch(registry, xaCommits, Tags.of("result", "readOnly")).functionCounter();
-        assertThat(readOnlyCommits.count()).isEqualTo(stats.xaCommitReadOnlyCount());
+        assertThat(readOnlyCommits.count()).isEqualTo((double) stats.xaCommitReadOnlyCount());
 
         FunctionCounter exceptionCommits = fetch(registry, xaCommits, Tags.of("result", "exception")).functionCounter();
-        assertThat(exceptionCommits.count()).isEqualTo(stats.xaCommitExceptionCount());
+        assertThat(exceptionCommits.count()).isEqualTo((double) stats.xaCommitExceptionCount());
 
         FunctionCounter committedCommits = fetch(registry, xaCommits, Tags.of("result", "committed")).functionCounter();
-        assertThat(committedCommits.count()).isEqualTo(stats.xaCommitCommittedCount());
+        assertThat(committedCommits.count()).isEqualTo((double) stats.xaCommitCommittedCount());
 
         // rollback transaction metrics
         String xaRollbacks = "cache.xa.rollbacks";
         FunctionCounter exceptionRollback = fetch(registry, xaRollbacks, Tags.of("result", "exception"))
-                .functionCounter();
-        assertThat(exceptionRollback.count()).isEqualTo(stats.xaRollbackExceptionCount());
+            .functionCounter();
+        assertThat(exceptionRollback.count()).isEqualTo((double) stats.xaRollbackExceptionCount());
 
         FunctionCounter successRollback = fetch(registry, xaRollbacks, Tags.of("result", "success")).functionCounter();
-        assertThat(successRollback.count()).isEqualTo(stats.xaRollbackSuccessCount());
+        assertThat(successRollback.count()).isEqualTo((double) stats.xaRollbackSuccessCount());
 
         // recovery transaction metrics
         String xaRecoveries = "cache.xa.recoveries";
         FunctionCounter nothingRecovered = fetch(registry, xaRecoveries, Tags.of("result", "nothing"))
-                .functionCounter();
-        assertThat(nothingRecovered.count()).isEqualTo(stats.xaRecoveryNothingCount());
+            .functionCounter();
+        assertThat(nothingRecovered.count()).isEqualTo((double) stats.xaRecoveryNothingCount());
 
         FunctionCounter successRecoveries = fetch(registry, xaRecoveries, Tags.of("result", "success"))
-                .functionCounter();
-        assertThat(successRecoveries.count()).isEqualTo(stats.xaRecoveryRecoveredCount());
+            .functionCounter();
+        assertThat(successRecoveries.count()).isEqualTo((double) stats.xaRecoveryRecoveredCount());
     }
 
     @Test
     void constructInstanceViaStaticMethodMonitor() {
+        // tag::monitor[]
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
         EhCache2Metrics.monitor(meterRegistry, cache, expectedTag);
+        // end::monitor[]
 
         meterRegistry.get("cache.remoteSize").tags(expectedTag).gauge();
     }
@@ -160,7 +165,7 @@ class EhCache2MetricsTest extends AbstractCacheMetricsTest {
     static void setup() {
         cacheManager = CacheManager.newInstance();
         cacheManager.addCache("testCache");
-        cache = cacheManager.getCache("testCache");
+        cache = spy(cacheManager.getCache("testCache"));
         StatisticsGateway stats = mock(StatisticsGateway.class);
         // generate non-negative random value to address false-positives
         int valueBound = 100000;
@@ -186,7 +191,7 @@ class EhCache2MetricsTest extends AbstractCacheMetricsTest {
         when(stats.xaRollbackSuccessCount()).thenReturn((long) random.nextInt(valueBound));
         when(stats.xaRecoveryRecoveredCount()).thenReturn((long) random.nextInt(valueBound));
         when(stats.xaRecoveryNothingCount()).thenReturn((long) random.nextInt(valueBound));
-        ReflectionTestUtils.setField(cache, "statistics", stats);
+        when(cache.getStatistics()).thenReturn(stats);
     }
 
     @AfterAll

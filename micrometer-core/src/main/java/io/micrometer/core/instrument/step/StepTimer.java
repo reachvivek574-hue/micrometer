@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,94 +18,89 @@ package io.micrometer.core.instrument.step;
 import io.micrometer.core.instrument.AbstractTimer;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
+import io.micrometer.core.instrument.distribution.Histogram;
 import io.micrometer.core.instrument.distribution.TimeWindowMax;
 import io.micrometer.core.instrument.distribution.pause.PauseDetector;
 import io.micrometer.core.instrument.util.TimeUtils;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * @author Jon Schneider
  */
-public class StepTimer extends AbstractTimer {
-    private final StepLong count;
-    private final StepLong total;
+public class StepTimer extends AbstractTimer implements StepMeter {
+
+    private final LongAdder count = new LongAdder();
+
+    private final LongAdder total = new LongAdder();
+
+    private final StepTuple2<Long, Long> countTotal;
+
     private final TimeWindowMax max;
 
     /**
      * Create a new {@code StepTimer}.
-     *
-     * @param id                          ID
-     * @param clock                       clock
+     * @param id ID
+     * @param clock clock
      * @param distributionStatisticConfig distribution statistic configuration
-     * @param pauseDetector               pause detector
-     * @param baseTimeUnit                base time unit
-     * @deprecated Use {@link #StepTimer(io.micrometer.core.instrument.Meter.Id, Clock, DistributionStatisticConfig, PauseDetector, TimeUnit, long, boolean)}
+     * @param pauseDetector pause detector
+     * @param baseTimeUnit base time unit
+     * @param stepDurationMillis step in milliseconds
+     * @param supportsAggregablePercentiles whether it supports aggregable percentiles
      */
-    @Deprecated
-    public StepTimer(Id id, Clock clock, DistributionStatisticConfig distributionStatisticConfig,
-                     PauseDetector pauseDetector, TimeUnit baseTimeUnit) {
-        this(id, clock, distributionStatisticConfig, pauseDetector, baseTimeUnit, false);
+    public StepTimer(final Id id, final Clock clock, final DistributionStatisticConfig distributionStatisticConfig,
+            final PauseDetector pauseDetector, final TimeUnit baseTimeUnit, final long stepDurationMillis,
+            final boolean supportsAggregablePercentiles) {
+        this(id, clock, distributionStatisticConfig, pauseDetector, baseTimeUnit, stepDurationMillis,
+                defaultHistogram(clock, distributionStatisticConfig, supportsAggregablePercentiles));
     }
 
     /**
      * Create a new {@code StepTimer}.
-     *
-     * @param id                            ID
-     * @param clock                         clock
-     * @param distributionStatisticConfig   distribution statistic configuration
-     * @param pauseDetector                 pause detector
-     * @param baseTimeUnit                  base time unit
-     * @param supportsAggregablePercentiles whether it supports aggregable percentiles
-     * @deprecated Use {@link #StepTimer(io.micrometer.core.instrument.Meter.Id, Clock, DistributionStatisticConfig, PauseDetector, TimeUnit, long, boolean)}
+     * @param id ID
+     * @param clock clock
+     * @param distributionStatisticConfig distribution statistic configuration
+     * @param pauseDetector pause detector
+     * @param baseTimeUnit base time unit
+     * @param stepDurationMillis step in milliseconds
+     * @param histogram histogram
+     * @since 1.11.1
      */
-    @Deprecated
-    @SuppressWarnings("ConstantConditions")
-    public StepTimer(Id id, Clock clock, DistributionStatisticConfig distributionStatisticConfig,
-                     PauseDetector pauseDetector, TimeUnit baseTimeUnit, boolean supportsAggregablePercentiles) {
-        this(id, clock, distributionStatisticConfig, pauseDetector, baseTimeUnit, distributionStatisticConfig.getExpiry().toMillis(), supportsAggregablePercentiles);
-    }
-
-    /**
-     * Create a new {@code StepTimer}.
-     *
-     * @param id                            ID
-     * @param clock                         clock
-     * @param distributionStatisticConfig   distribution statistic configuration
-     * @param pauseDetector                 pause detector
-     * @param baseTimeUnit                  base time unit
-     * @param stepMillis                    step in milliseconds
-     * @param supportsAggregablePercentiles whether it supports aggregable percentiles
-     */
-    @SuppressWarnings("ConstantConditions")
-    public StepTimer(Id id, Clock clock, DistributionStatisticConfig distributionStatisticConfig,
-                     PauseDetector pauseDetector, TimeUnit baseTimeUnit, long stepMillis, boolean supportsAggregablePercentiles) {
-        super(id, clock, distributionStatisticConfig, pauseDetector, baseTimeUnit, supportsAggregablePercentiles);
-        this.count = new StepLong(clock, stepMillis);
-        this.total = new StepLong(clock, stepMillis);
-        this.max = new TimeWindowMax(clock, distributionStatisticConfig);
+    protected StepTimer(final Id id, final Clock clock, final DistributionStatisticConfig distributionStatisticConfig,
+            final PauseDetector pauseDetector, final TimeUnit baseTimeUnit, final long stepDurationMillis,
+            Histogram histogram) {
+        super(id, clock, pauseDetector, baseTimeUnit, histogram);
+        countTotal = new StepTuple2<>(clock, stepDurationMillis, 0L, 0L, count::sumThenReset, total::sumThenReset);
+        max = new TimeWindowMax(clock, distributionStatisticConfig);
     }
 
     @Override
-    protected void recordNonNegative(long amount, TimeUnit unit) {
-        long nanoAmount = (long) TimeUtils.convert(amount, unit, TimeUnit.NANOSECONDS);
-        count.getCurrent().add(1);
-        total.getCurrent().add(nanoAmount);
-        max.record(amount, unit);
+    protected void recordNonNegative(final long amount, final TimeUnit unit) {
+        final long nanoAmount = unit.toNanos(amount);
+        count.add(1L);
+        total.add(nanoAmount);
+        max.record((double) nanoAmount);
     }
 
     @Override
     public long count() {
-        return (long) count.poll();
+        return countTotal.poll1();
     }
 
     @Override
-    public double totalTime(TimeUnit unit) {
-        return TimeUtils.nanosToUnit(total.poll(), unit);
+    public double totalTime(final TimeUnit unit) {
+        return TimeUtils.nanosToUnit(countTotal.poll2(), unit);
     }
 
     @Override
-    public double max(TimeUnit unit) {
-        return max.poll(unit);
+    public double max(final TimeUnit unit) {
+        return TimeUtils.nanosToUnit(max.poll(), unit);
     }
+
+    @Override
+    public void _closingRollover() {
+        countTotal._closingRollover();
+    }
+
 }

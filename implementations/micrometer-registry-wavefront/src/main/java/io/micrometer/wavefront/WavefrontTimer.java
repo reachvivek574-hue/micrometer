@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2019 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,7 +21,7 @@ import io.micrometer.core.instrument.cumulative.CumulativeTimer;
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
 import io.micrometer.core.instrument.distribution.pause.PauseDetector;
 import io.micrometer.core.instrument.util.TimeUtils;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.List;
@@ -33,28 +33,29 @@ import java.util.concurrent.TimeUnit;
  * @author Han Zhang
  */
 class WavefrontTimer extends CumulativeTimer {
-    @Nullable
-    private final WavefrontHistogramImpl delegate;
+
+    private final @Nullable WavefrontHistogramImpl delegate;
 
     WavefrontTimer(Id id, Clock clock, DistributionStatisticConfig distributionStatisticConfig,
-                   PauseDetector pauseDetector, TimeUnit baseTimeUnit) {
+            PauseDetector pauseDetector, TimeUnit baseTimeUnit) {
         super(id, clock, distributionStatisticConfig, pauseDetector, baseTimeUnit, false);
-        delegate = distributionStatisticConfig.isPublishingHistogram() ?
-            new WavefrontHistogramImpl(clock::wallTime) : null;
+        delegate = distributionStatisticConfig.isPublishingHistogram() ? new WavefrontHistogramImpl(clock::wallTime)
+                : null;
     }
 
     @Override
     protected void recordNonNegative(long amount, TimeUnit unit) {
         super.recordNonNegative(amount, unit);
         if (delegate != null) {
-            delegate.update(TimeUtils.convert(amount, unit, baseTimeUnit()));
+            delegate.update(TimeUtils.convert((double) amount, unit, baseTimeUnit()));
         }
     }
 
     List<WavefrontHistogramImpl.Distribution> flushDistributions() {
         if (delegate == null) {
             return Collections.emptyList();
-        } else {
+        }
+        else {
             return delegate.flushDistributions();
         }
     }
@@ -62,4 +63,5 @@ class WavefrontTimer extends CumulativeTimer {
     boolean isPublishingHistogram() {
         return delegate != null;
     }
+
 }

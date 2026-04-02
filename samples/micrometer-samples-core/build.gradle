@@ -1,20 +1,32 @@
+plugins {
+    id 'java'
+}
+
 dependencies {
-    compile project(':micrometer-core')
-    compile 'colt:colt:1.2.0'
-    compile('ch.qos.logback:logback-classic:1.2.+') {
-        force = true
-    }
-    compile('org.slf4j:slf4j-api:1.7.25') {
-        // logback doesn't yet work with slf4j 1.8
-        force = true
+    implementation platform(libs.reactorBom)
+    implementation(platform(libs.prometheusSimpleClientBom))
+
+    implementation project(':micrometer-core')
+    implementation project(':micrometer-observation')
+    implementation(libs.colt)
+    implementation(libs.logback12)
+    implementation(libs.slf4jApi)
+
+    ['atlas', 'prometheus', 'datadog', 'ganglia', 'elastic', 'graphite', 'jmx', 'influx', 'statsd', 'new-relic', 'cloudwatch2', 'signalfx', 'wavefront', 'dynatrace', 'azure-monitor', 'humio', 'appoptics', 'kairos', 'stackdriver'].each { sys ->
+        implementation project(":micrometer-registry-$sys")
     }
 
-    ['atlas', 'prometheus', 'datadog', 'ganglia', 'elastic', 'graphite', 'jmx', 'influx', 'statsd', 'new-relic', 'cloudwatch', 'cloudwatch2', 'signalfx', 'wavefront', 'dynatrace', 'azure-monitor', 'humio', 'appoptics', 'kairos', 'stackdriver'].each { sys ->
-        compile project(":micrometer-registry-$sys")
-    }
+    implementation libs.prometheusSimpleClientPushgateway
+    implementation 'io.projectreactor.netty:reactor-netty-http'
+    implementation libs.kafkaClients
+    implementation(libs.kafkaJunit)
+    implementation libs.grpcServices
+    implementation libs.grpcInprocess
 
-    compile 'io.prometheus:simpleclient_pushgateway:latest.release'
-    compile 'io.projectreactor.netty:reactor-netty:latest.release'
-    compile 'org.apache.kafka:kafka-clients:latest.release'
-    compile 'com.github.charithe:kafka-junit:4.1.2'
+}
+
+configurations.all {
+    // see: https://github.com/micrometer-metrics/micrometer/issues/3954
+    exclude group: 'com.google.guava', module: 'listenablefuture'
+    exclude group: 'io.grpc', module: 'grpc-netty-shaded'
 }

@@ -1,24 +1,27 @@
-/**
- * Copyright 2019 VMware, Inc.
- * <p>
+/*
+ * Copyright 2022 VMware, Inc.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package io.micrometer.core.instrument.dropwizard;
 
-import java.util.concurrent.TimeUnit;
-
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MockClock;
+import io.micrometer.core.instrument.Tags;
 import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -31,8 +34,9 @@ class DropwizardFunctionTimerTest {
 
     @Test
     void totalTimeWhenStateObjectChangedToNullShouldWorkWithChangedTimeUnit() {
-        DropwizardFunctionTimer<Object> functionTimer = new DropwizardFunctionTimer<>(
-                null, new MockClock(), new Object(), (o) -> 1L, (o) -> 1d, TimeUnit.SECONDS, TimeUnit.SECONDS);
+        Meter.Id id = new Meter.Id("name", Tags.empty(), null, null, Meter.Type.TIMER);
+        DropwizardFunctionTimer<Object> functionTimer = new DropwizardFunctionTimer<>(id, new MockClock(), new Object(),
+                (o) -> 1L, (o) -> 1d, TimeUnit.SECONDS, TimeUnit.SECONDS);
         assertThat(functionTimer.totalTime(TimeUnit.SECONDS)).isEqualTo(1d);
         assertThat(functionTimer.totalTime(TimeUnit.MILLISECONDS)).isEqualTo(1000d);
         System.gc();
@@ -42,8 +46,9 @@ class DropwizardFunctionTimerTest {
 
     @Test
     void getDropwizardMeterGetSnapshotGetMeanShouldReturnNanoseconds() {
-        DropwizardFunctionTimer<Object> functionTimer = new DropwizardFunctionTimer<>(
-                null, new MockClock(), new Object(), (o) -> 1L, (o) -> 1d, TimeUnit.SECONDS, TimeUnit.SECONDS);
+        Meter.Id id = new Meter.Id("name", Tags.empty(), null, null, Meter.Type.TIMER);
+        DropwizardFunctionTimer<Object> functionTimer = new DropwizardFunctionTimer<>(id, new MockClock(), new Object(),
+                (o) -> 1L, (o) -> 1d, TimeUnit.SECONDS, TimeUnit.SECONDS);
         assertThat(functionTimer.getDropwizardMeter().getSnapshot().getMean()).isEqualTo(1000_000_000d);
     }
 

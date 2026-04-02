@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,16 +18,18 @@ package io.micrometer.datadog;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Statistic;
 import io.micrometer.core.instrument.util.StringEscapeUtils;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.util.*;
 
 /**
  * @author Jon Schneider
+ * @author Gregory Zussa
  */
 class DatadogMetricMetadata {
 
     // Datadog rejects anything not on this list: https://docs.datadoghq.com/units/
+    // @formatter:off
     private static final Set<String> UNIT_WHITELIST = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "bit", "byte", "kibibyte", "mebibyte", "gibibyte", "tebibyte", "pebibyte", "exbibyte",
             "microsecond", "millisecond", "second", "minute", "hour", "day", "week", "nanosecond",
@@ -43,6 +45,7 @@ class DatadogMetricMetadata {
             "page", "split",
             "hertz", "kilohertz", "megahertz", "gigahertz",
             "entry")));
+    // @formatter:on
 
     private static final Map<String, String> PLURALIZED_UNIT_MAPPING;
 
@@ -55,48 +58,54 @@ class DatadogMetricMetadata {
     }
 
     private final Meter.Id id;
+
     private final String type;
+
     private final boolean descriptionsEnabled;
 
-    @Nullable
-    private final String overrideBaseUnit;
+    private final @Nullable String overrideBaseUnit;
 
     DatadogMetricMetadata(Meter.Id id, Statistic statistic, boolean descriptionsEnabled,
-                          @Nullable String overrideBaseUnit) {
+            @Nullable String overrideBaseUnit) {
         this.id = id;
         this.descriptionsEnabled = descriptionsEnabled;
         this.overrideBaseUnit = overrideBaseUnit;
 
+        this.type = sanitizeType(statistic);
+    }
+
+    @Nullable String editMetadataBody() {
+        if (descriptionsEnabled && id.getDescription() != null) {
+            String body = "{\"type\":\"" + type + "\"";
+
+            String baseUnit = sanitizeBaseUnit(id.getBaseUnit(), overrideBaseUnit);
+            if (baseUnit != null) {
+                body += ",\"unit\":\"" + baseUnit + "\"";
+            }
+            body += ",\"description\":\"" + StringEscapeUtils.escapeJson(id.getDescription()) + "\"}";
+            return body;
+        }
+        return null;
+    }
+
+    static @Nullable String sanitizeBaseUnit(@Nullable String baseUnit, @Nullable String overrideBaseUnit) {
+        String sanitizeBaseUnit = overrideBaseUnit != null ? overrideBaseUnit : baseUnit;
+        if (sanitizeBaseUnit != null) {
+            return UNIT_WHITELIST.contains(sanitizeBaseUnit) ? sanitizeBaseUnit
+                    : PLURALIZED_UNIT_MAPPING.get(sanitizeBaseUnit);
+        }
+        return null;
+    }
+
+    static String sanitizeType(Statistic statistic) {
         switch (statistic) {
             case COUNT:
             case TOTAL:
             case TOTAL_TIME:
-                this.type = "count";
-                break;
+                return "count";
             default:
-                this.type = "gauge";
+                return "gauge";
         }
     }
 
-    String editMetadataBody() {
-        String body = "{\"type\":\"" + type + "\"";
-
-        String baseUnit = overrideBaseUnit != null ? overrideBaseUnit : id.getBaseUnit();
-        if (baseUnit != null) {
-            String whitelistedBaseUnit = UNIT_WHITELIST.contains(baseUnit) ? baseUnit :
-                    PLURALIZED_UNIT_MAPPING.get(baseUnit);
-
-            if (whitelistedBaseUnit != null) {
-                body += ",\"unit\":\"" + whitelistedBaseUnit + "\"";
-            }
-        }
-
-        if (descriptionsEnabled && id.getDescription() != null) {
-            body += ",\"description\":\"" + StringEscapeUtils.escapeJson(id.getDescription()) + "\"";
-        }
-
-        body += "}";
-
-        return body;
-    }
 }

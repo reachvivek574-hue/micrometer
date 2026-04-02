@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,36 +17,26 @@ package io.micrometer.benchmark.core;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import io.micrometer.prometheus.PrometheusConfig;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
-import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.util.concurrent.TimeUnit;
 
-@State(Scope.Benchmark)
+@Fork(1)
+@Warmup(iterations = 5)
+@Measurement(iterations = 10)
+@BenchmarkMode(Mode.SampleTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
+@State(Scope.Benchmark)
 public class TimerBenchmark {
-    public static void main(String[] args) throws RunnerException {
-        Options opt = new OptionsBuilder()
-                .include(TimerBenchmark.class.getSimpleName())
-                .warmupIterations(5)
-                .measurementIterations(10)
-                .mode(Mode.SampleTime)
-                .forks(1)
-                .build();
-
-        new Runner(opt).run();
-    }
 
     private MeterRegistry registry;
-    private Timer timer;
 
-    int x = 923;
-    int y = 123;
+    private Timer timer;
 
     @Setup
     public void setup() {
@@ -56,24 +46,29 @@ public class TimerBenchmark {
 
     @Benchmark
     public int sumTimedWithSupplier() {
-        return timer.record(this::sum);
+        return timer.record(this::doSomething);
     }
 
     @Benchmark
-    public int sumTimedWithSample() {
+    public long sumTimedWithSample() {
         Timer.Sample sample = Timer.start(registry);
-        int sum = sum();
-        sample.stop(timer);
-        return sum;
+        doSomething();
+        return sample.stop(timer);
     }
 
     @Benchmark
     public int sumTimedWithRegistryLookup() {
-        return registry.timer("timer").record(this::sum);
+        return registry.timer("timer").record(this::doSomething);
     }
 
-    @Benchmark
-    public int sum() {
-        return x + y;
+    int doSomething() {
+        return 923 + 123;
     }
+
+    public static void main(String[] args) throws RunnerException {
+        new Runner(new OptionsBuilder().include(TimerBenchmark.class.getSimpleName())
+            // .addProfiler(GCProfiler.class)
+            .build()).run();
+    }
+
 }

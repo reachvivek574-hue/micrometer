@@ -1,12 +1,12 @@
-/**
- * Copyright 2017 VMware, Inc.
- * <p>
+/*
+ * Copyright 2021 VMware, Inc.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,287 +15,332 @@
  */
 package io.micrometer.dynatrace;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.Clock;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.Measurement;
-import io.micrometer.core.instrument.Meter;
-import io.micrometer.core.instrument.Statistic;
-import io.micrometer.core.instrument.Tags;
-import io.micrometer.core.instrument.TimeGauge;
-import io.micrometer.core.instrument.config.MissingRequiredConfigurationException;
+import io.micrometer.core.instrument.*;
 import io.micrometer.core.ipc.http.HttpSender;
+import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
-import java.io.IOException;
-import java.lang.reflect.Field;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isA;
+import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link DynatraceMeterRegistry}.
  *
- * @author Johnny Lim
+ * @author Jonatan Ivanov
  */
 class DynatraceMeterRegistryTest {
 
-    private final DynatraceMeterRegistry meterRegistry = createMeterRegistry();
+    private DynatraceConfig config;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private MockClock clock;
+
+    private HttpSender httpClient;
+
+    private DynatraceMeterRegistry meterRegistry;
+
+    @BeforeEach
+    void setUp() {
+        this.config = createDefaultDynatraceConfig();
+        this.clock = new MockClock();
+        // Set the clock to something recent so that the Dynatrace library will not
+        // complain.
+        this.clock.add(System.currentTimeMillis(), MILLISECONDS);
+        this.httpClient = mock(HttpSender.class);
+        this.meterRegistry = DynatraceMeterRegistry.builder(config).clock(clock).httpClient(httpClient).build();
+    }
 
     @Test
-    void constructorWhenUriIsMissingShouldThrowMissingRequiredConfigurationException() {
-        assertThatThrownBy(() -> new DynatraceMeterRegistry(new DynatraceConfig() {
-            @Override
-            public String get(String key) {
-                return null;
+    void shouldSendProperRequest() throws Throwable {
+        HttpSender.Request.Builder builder = HttpSender.Request.build(config.uri(), httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+        when(httpClient.send(isA(HttpSender.Request.class)))
+            .thenReturn(new HttpSender.Response(202, "{ \"linesOk\": 3, \"linesInvalid\": 0, \"error\": null }"));
+
+        Double gauge = meterRegistry.gauge("my.gauge", 42d);
+        Counter counter = meterRegistry.counter("my.counter");
+        counter.increment(12d);
+        Timer timer = meterRegistry.timer("my.timer");
+        timer.record(22, MILLISECONDS);
+        timer.record(42, MILLISECONDS);
+        timer.record(32, MILLISECONDS);
+        timer.record(12, MILLISECONDS);
+        clock.add(config.step());
+
+        meterRegistry.publish();
+
+        verify(httpClient).send(assertArg(request -> {
+            assertThat(request.getRequestHeaders()).containsOnly(entry("Content-Type", "text/plain"),
+                    entry("User-Agent", "micrometer"), entry("Authorization", "Api-Token apiToken"));
+
+            String[] lines = new String(request.getEntity(), StandardCharsets.UTF_8).trim().split("\n");
+            assertThat(lines).hasSize(4)
+                .containsExactly("my.counter,dt.metrics.source=micrometer count,delta=12 " + clock.wallTime(),
+                        "my.timer,dt.metrics.source=micrometer gauge,min=12,max=42,sum=108,count=4 " + clock.wallTime(),
+                        "my.gauge,dt.metrics.source=micrometer gauge," + formatDouble(gauge) + " " + clock.wallTime(),
+                        "#my.timer gauge dt.meta.unit=ms");
+        }));
+    }
+
+    @Test
+    void shouldResetBetweenRequests() throws Throwable {
+        HttpSender.Request.Builder builder = HttpSender.Request.build(config.uri(), httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+        when(httpClient.send(isA(HttpSender.Request.class)))
+            .thenReturn(new HttpSender.Response(202, "{ \"linesOk\": 1, \"linesInvalid\": 0, \"error\": null }"));
+
+        Timer timer = Timer.builder("my.timer").register(meterRegistry);
+        timer.record(22, MILLISECONDS);
+        timer.record(50, MILLISECONDS);
+        clock.add(config.step());
+
+        meterRegistry.publish();
+
+        ArgumentCaptor<HttpSender.Request> argumentCaptor = ArgumentCaptor.forClass(HttpSender.Request.class);
+        verify(httpClient).send(argumentCaptor.capture());
+        HttpSender.Request request = argumentCaptor.getValue();
+
+        assertThat(request.getEntity()).asString()
+            .hasLineCount(2)
+            .contains("my.timer,dt.metrics.source=micrometer gauge,min=22,max=50,sum=72,count=2 " + clock.wallTime(),
+                    "#my.timer gauge dt.meta.unit=ms");
+
+        // both are bigger than the previous min and smaller than the previous max. They
+        // will only show up if the
+        // summary was reset in between exports.
+        timer.record(33, MILLISECONDS);
+        timer.record(44, MILLISECONDS);
+        clock.add(config.step());
+
+        meterRegistry.publish();
+        ArgumentCaptor<HttpSender.Request> argumentCaptor2 = ArgumentCaptor.forClass(HttpSender.Request.class);
+        // needs to be two, since the previous request is also counted.
+        verify(httpClient, times(2)).send(argumentCaptor2.capture());
+        HttpSender.Request request2 = argumentCaptor2.getValue();
+
+        assertThat(request2.getEntity()).asString()
+            .hasLineCount(2)
+            .contains("my.timer,dt.metrics.source=micrometer gauge,min=33,max=44,sum=77,count=2 " + clock.wallTime(),
+                    "#my.timer gauge dt.meta.unit=ms");
+    }
+
+    @Test
+    void shouldNotTrackPercentilesWithDynatraceSummary() throws Throwable {
+        HttpSender.Request.Builder builder = HttpSender.Request.build(config.uri(), httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+        Timer timer = Timer.builder("my.timer").publishPercentiles(0.5, 0.75, 0.9, 0.99).register(meterRegistry);
+        timer.record(22, MILLISECONDS);
+        timer.record(55, MILLISECONDS);
+
+        clock.add(config.step());
+        meterRegistry.publish();
+        verify(httpClient).send(assertArg(request -> assertThat(request.getEntity()).asString()
+            .hasLineCount(2)
+            .contains("my.timer,dt.metrics.source=micrometer gauge,min=22,max=55,sum=77,count=2 " + clock.wallTime(),
+                    "#my.timer gauge dt.meta.unit=ms")));
+    }
+
+    @Test
+    void shouldTrackPercentilesWhenDynatraceSummaryInstrumentsNotUsed() throws Throwable {
+        DynatraceConfig dynatraceConfig = getNonSummaryInstrumentsConfig();
+
+        DynatraceMeterRegistry registry = DynatraceMeterRegistry.builder(dynatraceConfig)
+            .httpClient(httpClient)
+            .clock(clock)
+            .build();
+
+        HttpSender.Request.Builder builder = HttpSender.Request.build(config.uri(), httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+
+        double[] trackedPercentiles = new double[] { 0.5, 0.7, 0.99 };
+
+        Timer timer = Timer.builder("my.timer").publishPercentiles(trackedPercentiles).register(registry);
+        DistributionSummary distributionSummary = DistributionSummary.builder("my.ds")
+            .publishPercentiles(trackedPercentiles)
+            .register(registry);
+        LongTaskTimer longTaskTimer = LongTaskTimer.builder("my.ltt")
+            .publishPercentiles(trackedPercentiles)
+            .register(registry);
+
+        timer.record(Duration.ofMillis(100));
+        distributionSummary.record(100);
+
+        CountDownLatch lttCountDownLatch1 = new CountDownLatch(1);
+        CountDownLatch lttCountDownLatch2 = new CountDownLatch(1);
+
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        Duration longTaskTimerDuration = Duration.ofMillis(100);
+        executorService.submit(() -> longTaskTimer.record(() -> {
+            clock.add(longTaskTimerDuration);
+            lttCountDownLatch1.countDown();
+
+            try {
+                assertThat(lttCountDownLatch2.await(300, MILLISECONDS)).isTrue();
             }
-
-            @Override
-            public String deviceId() {
-                return "deviceId";
+            catch (InterruptedException e) {
+                throw new RuntimeException(e);
             }
+        }));
 
+        // The 'longTaskTimerDuration' should be subtracted as depending on
+        // System.currentTimeMillis(), the 'longTaskTimerDuration' could start another
+        // step.
+        clock.add(dynatraceConfig.step().minus(longTaskTimerDuration));
+
+        assertThat(lttCountDownLatch1.await(100, MILLISECONDS)).isTrue();
+        registry.publish();
+        // release long task timer
+        lttCountDownLatch2.countDown();
+
+        verify(httpClient).send(
+                assertArg(request -> assertThat(request.getEntity()).asString()
+                    .hasLineCount(16)
+                    .contains(
+                            // Timer lines
+                            "my.timer,dt.metrics.source=micrometer gauge,min=100,max=100,sum=100,count=1 "
+                                    + clock.wallTime(),
+                            "#my.timer gauge dt.meta.unit=ms",
+                            // Timer percentile lines. Percentiles are 0 because the step
+                            // rolled over.
+                            "my.timer.percentile,dt.metrics.source=micrometer,phi=0.5 gauge,0 " + clock.wallTime(),
+                            "my.timer.percentile,dt.metrics.source=micrometer,phi=0.7 gauge,0 " + clock.wallTime(),
+                            "my.timer.percentile,dt.metrics.source=micrometer,phi=0.99 gauge,0 " + clock.wallTime(),
+                            "#my.timer.percentile gauge dt.meta.unit=ms",
+
+                            // DistributionSummary lines
+                            "my.ds,dt.metrics.source=micrometer gauge,min=100,max=100,sum=100,count=1 "
+                                    + clock.wallTime(),
+                            // DistributionSummary percentile lines. Percentiles are 0
+                            // because the step rolled over.
+                            "my.ds.percentile,dt.metrics.source=micrometer,phi=0.5 gauge,0 " + clock.wallTime(),
+                            "my.ds.percentile,dt.metrics.source=micrometer,phi=0.7 gauge,0 " + clock.wallTime(),
+                            "my.ds.percentile,dt.metrics.source=micrometer,phi=0.99 gauge,0 " + clock.wallTime(),
+
+                            // LongTaskTimer lines
+                            "my.ltt,dt.metrics.source=micrometer gauge,min=100,max=100,sum=100,count=1 "
+                                    + clock.wallTime(),
+                            "#my.ltt gauge dt.meta.unit=ms",
+                            // LongTaskTimer percentile lines
+                            // 0th percentile is missing because it doesn't clear the
+                            // "interpolatable line" threshold defined in
+                            // DefaultLongTaskTimer#takeSnapshot().
+                            "my.ltt.percentile,dt.metrics.source=micrometer,phi=0.5 gauge,100 " + clock.wallTime(),
+                            "my.ltt.percentile,dt.metrics.source=micrometer,phi=0.7 gauge,100 " + clock.wallTime(),
+                            "my.ltt.percentile,dt.metrics.source=micrometer,phi=0.99 gauge,100 " + clock.wallTime(),
+                            "#my.ltt.percentile gauge dt.meta.unit=ms")));
+    }
+
+    @Test
+    void shouldTrackPercentilesWhenDynatraceSummaryInstrumentsNotUsed_shouldExport0PercentileWhenSpecified()
+            throws Throwable {
+        DynatraceConfig dynatraceConfig = getNonSummaryInstrumentsConfig();
+
+        DynatraceMeterRegistry registry = DynatraceMeterRegistry.builder(dynatraceConfig)
+            .httpClient(httpClient)
+            .clock(clock)
+            .build();
+
+        HttpSender.Request.Builder builder = HttpSender.Request.build(config.uri(), httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+
+        // create instruments with an explicit 0 percentile. This should be exported.
+        Timer timer = Timer.builder("my.timer").publishPercentiles(0, 0.5, 0.99).register(registry);
+        DistributionSummary distributionSummary = DistributionSummary.builder("my.ds")
+            .publishPercentiles(0, 0.5, 0.99)
+            .register(registry);
+        // For LongTaskTimer, the 0 percentile is not tracked as it doesn't clear the
+        // "interpolatable line" threshold defined in DefaultLongTaskTimer#takeSnapshot().
+        // see shouldTrackPercentilesWhenDynatraceSummaryInstrumentsNotUsed for a test
+        // that exports LongTaskTimer percentiles
+
+        timer.record(Duration.ofMillis(100));
+        distributionSummary.record(100);
+
+        clock.add(dynatraceConfig.step());
+
+        registry.publish();
+
+        verify(httpClient)
+            .send(assertArg(request -> assertThat(request.getEntity()).asString()
+                .hasLineCount(10)
+                .contains(
+                        // Timer lines
+                        "my.timer,dt.metrics.source=micrometer gauge,min=100,max=100,sum=100,count=1 "
+                                + clock.wallTime(),
+                        "#my.timer gauge dt.meta.unit=ms",
+                        // Timer percentile lines. Percentiles are 0 because the step
+                        // rolled over.
+                        "my.timer.percentile,dt.metrics.source=micrometer,phi=0 gauge,0 " + clock.wallTime(),
+                        "my.timer.percentile,dt.metrics.source=micrometer,phi=0.5 gauge,0 " + clock.wallTime(),
+                        "my.timer.percentile,dt.metrics.source=micrometer,phi=0.99 gauge,0 " + clock.wallTime(),
+                        "#my.timer.percentile gauge dt.meta.unit=ms",
+
+                        // DistributionSummary lines
+                        "my.ds,dt.metrics.source=micrometer gauge,min=100,max=100,sum=100,count=1 " + clock.wallTime(),
+                        // DistributionSummary percentile lines. Percentiles are 0 because
+                        // the step rolled over.
+                        "my.ds.percentile,dt.metrics.source=micrometer,phi=0 gauge,0 " + clock.wallTime(),
+                        "my.ds.percentile,dt.metrics.source=micrometer,phi=0.5 gauge,0 " + clock.wallTime(),
+                        "my.ds.percentile,dt.metrics.source=micrometer,phi=0.99 gauge,0 " + clock.wallTime())));
+    }
+
+    @Test
+    void shouldNotExportLinesWithZeroCount() throws Throwable {
+        HttpSender.Request.Builder builder = HttpSender.Request.build(config.uri(), httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+        Timer timer = Timer.builder("my.timer").register(meterRegistry);
+
+        // ---> first export interval, one request is sent:
+        timer.record(44, MILLISECONDS);
+        clock.add(config.step());
+        meterRegistry.publish();
+
+        verify(httpClient).send(assertArg(request -> assertThat(request.getEntity()).asString()
+            .hasLineCount(2)
+            .contains("my.timer,dt.metrics.source=micrometer gauge,min=44,max=44,sum=44,count=1 " + clock.wallTime(),
+                    "#my.timer gauge dt.meta.unit=ms")));
+
+        // reset for next export interval
+        reset(httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+
+        // ---> second export interval, no values are recorded
+        clock.add(config.step());
+        meterRegistry.publish();
+
+        // if the line has 0 count, don't send anything
+        verify(httpClient, never()).send(any());
+
+        // reset for next export interval
+        reset(httpClient);
+        when(httpClient.post(config.uri())).thenReturn(builder);
+
+        // ---> third export interval
+        timer.record(33, MILLISECONDS);
+        clock.add(config.step());
+        meterRegistry.publish();
+
+        verify(httpClient).send(assertArg(request -> assertThat(request.getEntity()).asString()
+            .hasLineCount(2)
+            .contains("my.timer,dt.metrics.source=micrometer gauge,min=33,max=33,sum=33,count=1 " + clock.wallTime(),
+                    "#my.timer gauge dt.meta.unit=ms")));
+    }
+
+    private DynatraceConfig createDefaultDynatraceConfig() {
+        return new DynatraceConfig() {
             @Override
-            public String apiToken() {
-                return "apiToken";
-            }
-        }, Clock.SYSTEM))
-                .isExactlyInstanceOf(MissingRequiredConfigurationException.class)
-                .hasMessage("uri must be set to report metrics to Dynatrace");
-    }
-
-    @Test
-    void constructorWhenDeviceIdIsMissingShouldThrowMissingRequiredConfigurationException() {
-        assertThatThrownBy(() -> new DynatraceMeterRegistry(new DynatraceConfig() {
-            @Override
-            public String get(String key) {
-                return null;
-            }
-
-            @Override
-            public String uri() {
-                return "uri";
-            }
-
-            @Override
-            public String apiToken() {
-                return "apiToken";
-            }
-        }, Clock.SYSTEM))
-                .isExactlyInstanceOf(MissingRequiredConfigurationException.class)
-                .hasMessage("deviceId must be set to report metrics to Dynatrace");
-    }
-
-    @Test
-    void constructorWhenApiTokenIsMissingShouldThrowMissingRequiredConfigurationException() {
-        assertThatThrownBy(() -> new DynatraceMeterRegistry(new DynatraceConfig() {
-            @Override
-            public String get(String key) {
-                return null;
-            }
-
-            @Override
-            public String uri() {
-                return "uri";
-            }
-
-            @Override
-            public String deviceId() {
-                return "deviceId";
-            }
-        }, Clock.SYSTEM))
-                .isExactlyInstanceOf(MissingRequiredConfigurationException.class)
-                .hasMessage("apiToken must be set to report metrics to Dynatrace");
-    }
-
-    @Test
-    void putCustomMetricOnSuccessShouldAddMetricIdToCreatedCustomMetrics() throws NoSuchFieldException, IllegalAccessException {
-        Field createdCustomMetricsField = DynatraceMeterRegistry.class.getDeclaredField("createdCustomMetrics");
-        createdCustomMetricsField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        Set<String> createdCustomMetrics = (Set<String>) createdCustomMetricsField.get(meterRegistry);
-        assertThat(createdCustomMetrics).isEmpty();
-
-        DynatraceMetricDefinition customMetric = new DynatraceMetricDefinition("metricId", null, null, null, new String[]{"type"}, null);
-        meterRegistry.putCustomMetric(customMetric);
-        assertThat(createdCustomMetrics).containsExactly("metricId");
-    }
-
-    @Test
-    void writeMeterWithGauge() {
-        meterRegistry.gauge("my.gauge", 1d);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
-        assertThat(meterRegistry.writeMeter(gauge)).hasSize(1);
-    }
-
-    @Test
-    void writeMeterWithGaugeShouldDropNanValue() {
-        meterRegistry.gauge("my.gauge", Double.NaN);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
-        assertThat(meterRegistry.writeMeter(gauge)).isEmpty();
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void writeMeterWithGaugeWhenChangingFiniteToNaNShouldWork() {
-        AtomicBoolean first = new AtomicBoolean(true);
-        meterRegistry.gauge("my.gauge", first, (b) -> b.getAndSet(false) ? 1d : Double.NaN);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
-        Stream<DynatraceMeterRegistry.DynatraceCustomMetric> stream = meterRegistry.writeMeter(gauge);
-        List<DynatraceMeterRegistry.DynatraceCustomMetric> metrics = stream.collect(Collectors.toList());
-        assertThat(metrics).hasSize(1);
-        DynatraceMeterRegistry.DynatraceCustomMetric metric = metrics.get(0);
-        DynatraceTimeSeries timeSeries = metric.getTimeSeries();
-        try {
-            Map<String, Object> map = mapper.readValue(timeSeries.asJson(), Map.class);
-            List<List<Number>> dataPoints = (List<List<Number>>) map.get("dataPoints");
-            assertThat(dataPoints.get(0).get(1).doubleValue()).isEqualTo(1d);
-        } catch (IOException ex) {
-            throw new RuntimeException(ex);
-        }
-    }
-
-    @Test
-    void writeMeterWithGaugeShouldDropInfiniteValues() {
-        meterRegistry.gauge("my.gauge", Double.POSITIVE_INFINITY);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
-        assertThat(meterRegistry.writeMeter(gauge)).isEmpty();
-
-        meterRegistry.gauge("my.gauge", Double.NEGATIVE_INFINITY);
-        gauge = meterRegistry.find("my.gauge").gauge();
-        assertThat(meterRegistry.writeMeter(gauge)).isEmpty();
-    }
-
-    @Test
-    void writeMeterWithTimeGauge() {
-        AtomicReference<Double> obj = new AtomicReference<>(1d);
-        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
-        assertThat(meterRegistry.writeMeter(timeGauge)).hasSize(1);
-    }
-
-    @Test
-    void writeMeterWithTimeGaugeShouldDropNanValue() {
-        AtomicReference<Double> obj = new AtomicReference<>(Double.NaN);
-        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
-        assertThat(meterRegistry.writeMeter(timeGauge)).isEmpty();
-    }
-
-    @Test
-    void writeMeterWithTimeGaugeShouldDropInfiniteValues() {
-        AtomicReference<Double> obj = new AtomicReference<>(Double.POSITIVE_INFINITY);
-        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
-        assertThat(meterRegistry.writeMeter(timeGauge)).isEmpty();
-
-        obj = new AtomicReference<>(Double.NEGATIVE_INFINITY);
-        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
-        timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
-        assertThat(meterRegistry.writeMeter(timeGauge)).isEmpty();
-    }
-
-    @Test
-    void writeCustomMetrics() {
-        Double number = 1d;
-        meterRegistry.gauge("my.gauge", number);
-        Gauge gauge = meterRegistry.find("my.gauge").gauge();
-        Stream<DynatraceMeterRegistry.DynatraceCustomMetric> series = meterRegistry.writeMeter(gauge);
-        List<DynatraceTimeSeries> timeSeries = series
-            .map(DynatraceMeterRegistry.DynatraceCustomMetric::getTimeSeries)
-            .collect(Collectors.toList());
-        List<DynatraceBatchedPayload> entries = meterRegistry.createPostMessages("my.type", null, timeSeries);
-        assertThat(entries).hasSize(1);
-        assertThat(entries.get(0).metricCount).isEqualTo(1);
-        assertThat(isValidJson(entries.get(0).payload)).isEqualTo(true);
-    }
-
-    @Test
-    void whenAllTsTooLargeEmptyMessageListReturned() {
-        List<DynatraceBatchedPayload> messages = meterRegistry.createPostMessages("my.type", null, Collections.singletonList(createTimeSeriesWithDimensions(10_000)));
-        assertThat(messages).isEmpty();
-    }
-
-    @Test
-    void splitsWhenExactlyExceedingMaxByComma() {
-        // comma needs to be considered when there is more than one time series
-        List<DynatraceBatchedPayload> messages = meterRegistry.createPostMessages("my.type", "my.group",
-            // Max bytes: 15330 (excluding header/footer, 15360 with header/footer)
-            Arrays.asList(createTimeSeriesWithDimensions(750), // 14861 bytes
-                createTimeSeriesWithDimensions(23, "asdfg"), // 469 bytes (overflows due to comma)
-                createTimeSeriesWithDimensions(750), // 14861 bytes
-                createTimeSeriesWithDimensions(22, "asd") // 468 bytes + comma
-            ));
-        assertThat(messages).hasSize(3);
-        assertThat(messages.get(0).metricCount).isEqualTo(1);
-        assertThat(messages.get(1).metricCount).isEqualTo(1);
-        assertThat(messages.get(2).metricCount).isEqualTo(2);
-        assertThat(messages.get(2).payload.getBytes(UTF_8).length).isEqualTo(15360);
-        assertThat(messages.stream().map(message -> message.payload).allMatch(this::isValidJson)).isTrue();
-    }
-
-    @Test
-    void countsPreviousAndNextComma() {
-        List<DynatraceBatchedPayload> messages = meterRegistry.createPostMessages("my.type", null,
-            // Max bytes: 15330 (excluding header/footer, 15360 with header/footer)
-            Arrays.asList(createTimeSeriesWithDimensions(750), // 14861 bytes
-                createTimeSeriesWithDimensions(10, "asdf"), // 234 bytes + comma
-                createTimeSeriesWithDimensions(10, "asdf") // 234 bytes + comma = 15331 bytes (overflow)
-            ));
-        assertThat(messages).hasSize(2);
-        assertThat(messages.get(0).metricCount).isEqualTo(2);
-        assertThat(messages.get(1).metricCount).isEqualTo(1);
-        assertThat(messages.stream().map(message -> message.payload).allMatch(this::isValidJson)).isTrue();
-    }
-
-    @Test
-    void writeMeterWhenCustomMeterHasOnlyNonFiniteValuesShouldNotBeWritten() {
-        Measurement measurement1 = new Measurement(() -> Double.POSITIVE_INFINITY, Statistic.VALUE);
-        Measurement measurement2 = new Measurement(() -> Double.NEGATIVE_INFINITY, Statistic.VALUE);
-        Measurement measurement3 = new Measurement(() -> Double.NaN, Statistic.VALUE);
-        List<Measurement> measurements = Arrays.asList(measurement1, measurement2, measurement3);
-        Meter meter = Meter.builder("my.meter", Meter.Type.GAUGE, measurements).register(this.meterRegistry);
-        assertThat(meterRegistry.writeMeter(meter)).isEmpty();
-    }
-
-    @Test
-    void writeMeterWhenCustomMeterHasMixedFiniteAndNonFiniteValuesShouldSkipOnlyNonFiniteValues() {
-        Measurement measurement1 = new Measurement(() -> Double.POSITIVE_INFINITY, Statistic.VALUE);
-        Measurement measurement2 = new Measurement(() -> Double.NEGATIVE_INFINITY, Statistic.VALUE);
-        Measurement measurement3 = new Measurement(() -> Double.NaN, Statistic.VALUE);
-        Measurement measurement4 = new Measurement(() -> 1d, Statistic.VALUE);
-        Measurement measurement5 = new Measurement(() -> 2d, Statistic.VALUE);
-        List<Measurement> measurements = Arrays.asList(measurement1, measurement2, measurement3, measurement4, measurement5);
-        Meter meter = Meter.builder("my.meter", Meter.Type.GAUGE, measurements).register(this.meterRegistry);
-        assertThat(meterRegistry.writeMeter(meter)).hasSize(2);
-    }
-
-    private DynatraceTimeSeries createTimeSeriesWithDimensions(int numberOfDimensions) {
-        return createTimeSeriesWithDimensions(numberOfDimensions, "some.metric");
-    }
-    private DynatraceTimeSeries createTimeSeriesWithDimensions(int numberOfDimensions, String metricId) {
-        return new DynatraceTimeSeries(metricId, System.currentTimeMillis(), 1.23, createDimensionsMap(numberOfDimensions));
-    }
-    private Map<String, String> createDimensionsMap(int numberOfDimensions) {
-        Map<String, String> map = new HashMap<>();
-        IntStream.range(0, numberOfDimensions).forEach(i -> map.put("key" + i, "value" + i));
-        return map;
-    }
-
-    private DynatraceMeterRegistry createMeterRegistry() {
-        DynatraceConfig config = new DynatraceConfig() {
-            @Override
-            public String get(String key) {
+            public @Nullable String get(String key) {
                 return null;
             }
 
@@ -305,27 +350,52 @@ class DynatraceMeterRegistryTest {
             }
 
             @Override
-            public String deviceId() {
-                return "deviceId";
+            public String apiToken() {
+                return "apiToken";
+            }
+
+            @Override
+            public DynatraceApiVersion apiVersion() {
+                return DynatraceApiVersion.V2;
+            }
+        };
+    }
+
+    private static DynatraceConfig getNonSummaryInstrumentsConfig() {
+        return new DynatraceConfig() {
+            @Override
+            public @Nullable String get(String key) {
+                return null;
+            }
+
+            @Override
+            public String uri() {
+                return "http://localhost";
             }
 
             @Override
             public String apiToken() {
                 return "apiToken";
             }
+
+            @Override
+            public DynatraceApiVersion apiVersion() {
+                return DynatraceApiVersion.V2;
+            }
+
+            @Override
+            public boolean useDynatraceSummaryInstruments() {
+                return false;
+            }
         };
-        return DynatraceMeterRegistry.builder(config)
-            .httpClient(request -> new HttpSender.Response(200, null))
-            .build();
     }
 
-    private boolean isValidJson(String json) {
-        try {
-            mapper.readTree(json);
-            return true;
-        } catch (Exception e) {
-            return false;
+    private String formatDouble(double value) {
+        if (value == (long) value) {
+            return Long.toString((long) value);
         }
+
+        return Double.toString(value);
     }
 
 }

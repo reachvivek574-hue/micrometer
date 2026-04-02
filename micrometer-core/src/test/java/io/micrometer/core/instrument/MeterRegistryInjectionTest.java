@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,11 +19,8 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
@@ -38,27 +35,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * @author Jon Schneider
  */
 class MeterRegistryInjectionTest {
-    
-    @Test
-    void injectWithSpring() {
-        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(SpringConfiguration.class)) {
-            MyComponent component = ctx.getBean(MyComponent.class);
-            component.performanceCriticalFeature();
-            assertThat(component.registry).isInstanceOf(SimpleMeterRegistry.class);
-            component.registry.get("feature.counter").counter();
-        }
-    }
 
-//    @Test
-//    void injectWithDagger() {
-//        DagConfiguration conf = DaggerDagConfiguration.create();
-//        MyComponent component = conf.component();
-//        component.after(); // @PostConstruct is not automatically called
-//        component.performanceCriticalFeature();
-//        assertThat(component.registry)
-//                .isInstanceOf(SimpleMeterRegistry.class)
-//                .matches(r -> r.find("feature.counter").counter().isPresent());
-//    }
+    // @Test
+    // void injectWithDagger() {
+    // DagConfiguration conf = DaggerDagConfiguration.create();
+    // MyComponent component = conf.component();
+    // component.after(); // @PostConstruct is not automatically called
+    // component.performanceCriticalFeature();
+    // assertThat(component.registry)
+    // .isInstanceOf(SimpleMeterRegistry.class)
+    // .matches(r -> r.find("feature.counter").counter().isPresent());
+    // }
 
     @Test
     void injectWithGuice() {
@@ -73,52 +60,41 @@ class MeterRegistryInjectionTest {
     @Test
     void noInjection() {
         MyComponent component = new MyComponent();
-        assertThatThrownBy(component::performanceCriticalFeature)
-            .isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(component::performanceCriticalFeature).isInstanceOf(NullPointerException.class);
     }
+
 }
 
-//@Component(modules = DagConfiguration.RegistryConf.class)
-//interface DagConfiguration {
-//    MyComponent component();
+// @Component(modules = DagConfiguration.RegistryConf.class)
+// interface DagConfiguration {
+// MyComponent component();
 //
-//    @Module
-//    class RegistryConf {
-//        @Provides
-//        static MeterRegistry registry() {
-//            return new SimpleMeterRegistry();
-//        }
-//    }
-//}
-
-@Configuration
-class SpringConfiguration {
-    @Bean
-    SimpleMeterRegistry meterRegistry() {
-        return new SimpleMeterRegistry();
-    }
-
-    @Bean
-    MyComponent component() {
-        return new MyComponent();
-    }
-}
+// @Module
+// class RegistryConf {
+// @Provides
+// static MeterRegistry registry() {
+// return new SimpleMeterRegistry();
+// }
+// }
+// }
 
 class GuiceConfiguration extends AbstractModule {
+
     @Override
     protected void configure() {
         bind(MeterRegistry.class).to(SimpleMeterRegistry.class);
     }
+
 }
 
 class MyComponent {
+
     @Nullable
     @Inject
     MeterRegistry registry;
 
     // for performance-critical uses, it is best to store a meter in a field
-    @Nullable
-    Counter counter;
+    @Nullable Counter counter;
 
     @Inject
     MyComponent() {
@@ -138,4 +114,5 @@ class MyComponent {
         // the retrieval of the counter
         Metrics.counter("infrequent.counter").increment();
     }
+
 }

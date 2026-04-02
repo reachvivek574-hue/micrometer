@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,29 +15,35 @@
  */
 package io.micrometer.wavefront;
 
-import io.micrometer.core.instrument.config.MissingRequiredConfigurationException;
+import com.wavefront.sdk.common.clients.service.token.TokenService;
+import io.micrometer.core.instrument.config.validate.InvalidReason;
+import io.micrometer.core.instrument.config.validate.Validated;
 import io.micrometer.core.instrument.push.PushRegistryConfig;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
-import java.net.URI;
 import java.net.UnknownHostException;
-import java.time.Duration;
+
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.*;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.*;
 
 /**
  * Configuration for {@link WavefrontMeterRegistry}.
  *
+ * @deprecated since 1.16.0 due to Wavefront's End of Life Announcement
  * @author Howard Yoo
  * @author Jon Schneider
  * @since 1.0.0
  */
+@Deprecated
 public interface WavefrontConfig extends PushRegistryConfig {
+
     /**
      * Publishes to a wavefront sidecar running out of process.
      */
     WavefrontConfig DEFAULT_PROXY = new WavefrontConfig() {
         @Override
-        public String get(String key) {
+        public @Nullable String get(String key) {
             return null;
         }
 
@@ -53,7 +59,7 @@ public interface WavefrontConfig extends PushRegistryConfig {
      */
     WavefrontConfig DEFAULT_DIRECT = new WavefrontConfig() {
         @Override
-        public String get(String key) {
+        public @Nullable String get(String key) {
             return null;
         }
 
@@ -65,107 +71,123 @@ public interface WavefrontConfig extends PushRegistryConfig {
     };
 
     @Override
-    default Duration step() {
-        String v = get(prefix() + ".step");
-        return v == null ? Duration.ofSeconds(10) : Duration.parse(v);
-    }
-
-    @Override
     default String prefix() {
         return "wavefront";
     }
 
     /**
-     * @return The URI to publish metrics to. The URI could represent a Wavefront sidecar or the
-     * Wavefront API host. This host could also represent an internal proxy set up in your environment
-     * that forwards metrics data to the Wavefront API host.
-     * <p>If publishing metrics to a Wavefront proxy (as described in https://docs.wavefront.com/proxies_installing.html),
-     * the host must be in the proxy://HOST:PORT format.
+     * @return The URI to publish metrics to. The URI could represent a Wavefront sidecar
+     * or the Wavefront API host. This host could also represent an internal proxy set up
+     * in your environment that forwards metrics data to the Wavefront API host.
+     * <p>
+     * If publishing metrics to a Wavefront proxy (as described in
+     * https://docs.wavefront.com/proxies_installing.html), the host must be in the
+     * proxy://HOST:PORT format.
      */
     default String uri() {
-        String v = get(prefix() + ".uri");
-        if (v == null)
-            throw new MissingRequiredConfigurationException("A uri is required to publish metrics to Wavefront");
-        return v;
+        return getUriString(this, "uri").required().get();
     }
 
     /**
-     * @return The port to send to when sending histogram distributions to a Wavefront proxy.
-     * The default is the port specified in the uri.
-     * <p>For details on configuring the histogram proxy port, see
-     * https://docs.wavefront.com/proxies_installing.html#configuring-proxy-ports-for-metrics-histograms-and-traces
-     * @since 1.2.0
+     * Get distribution port.
+     * @return distribution port
+     * @deprecated since 1.5.0 this is no longer used as a single proxy port can handle
+     * all wavefront formats.
      */
+    @Deprecated
     default int distributionPort() {
-        String v = get(prefix() + ".distributionPort");
-        return v == null ? URI.create(uri()).getPort() : Integer.parseInt(v);
+        return -1;
     }
 
     /**
-     * @return Unique identifier for the app instance that is publishing metrics to Wavefront. Defaults to the local host name.
+     * @return Unique identifier for the app instance that is publishing metrics to
+     * Wavefront. Defaults to the local host name.
      */
     default String source() {
-        String v = get(prefix() + ".source");
-        if (v != null)
-            return v;
-
-        try {
-            return InetAddress.getLocalHost().getHostName();
-        } catch (UnknownHostException uhe) {
-            return "unknown";
-        }
+        return getString(this, "source").orElseGet(() -> {
+            try {
+                return InetAddress.getLocalHost().getHostName();
+            }
+            catch (UnknownHostException uhe) {
+                return "unknown";
+            }
+        });
     }
 
     /**
-     * Required when publishing directly to the Wavefront API host, otherwise does nothing.
-     *
+     * API token type.
+     * @return API token type
+     * @since 1.12.0
+     */
+    default TokenService.Type apiTokenType() {
+        return getEnum(this, TokenService.Type.class, "apiTokenType")
+            .invalidateWhen(
+                    tokenType -> tokenType == TokenService.Type.NO_TOKEN && WavefrontMeterRegistry.isDirectToApi(this),
+                    "must be set to something else whenever publishing directly to the Wavefront API",
+                    InvalidReason.MISSING)
+            .orElse(WavefrontMeterRegistry.isDirectToApi(this) ? TokenService.Type.WAVEFRONT_API_TOKEN
+                    : TokenService.Type.NO_TOKEN);
+    }
+
+    /**
+     * Required when publishing directly to the Wavefront API host, otherwise does
+     * nothing.
      * @return The Wavefront API token.
      */
-    @Nullable
-    default String apiToken() {
-        String v = get(prefix() + ".apiToken");
-        return v == null ? null : v.trim().length() > 0 ? v : null;
+    default @Nullable String apiToken() {
+        return getSecret(this, "apiToken")
+            .invalidateWhen(token -> token == null && WavefrontMeterRegistry.isDirectToApi(this),
+                    "must be set whenever publishing directly to the Wavefront API", InvalidReason.MISSING)
+            .orElse(null);
     }
 
     /**
-     * @return {@code true} to report histogram distributions aggregated into minute intervals.
-     * Default is {@code true}.
+     * @return {@code true} to report histogram distributions aggregated into minute
+     * intervals. Default is {@code true}.
      * @since 1.2.0
      */
     default boolean reportMinuteDistribution() {
-        String v = get(prefix() + ".reportMinuteDistribution");
-        return v == null || Boolean.parseBoolean(v);
+        return getBoolean(this, "reportMinuteDistribution").orElse(true);
     }
 
     /**
-     * @return {@code true} to report histogram distributions aggregated into hour intervals.
-     * Default is {@code false}.
+     * @return {@code true} to report histogram distributions aggregated into hour
+     * intervals. Default is {@code false}.
      * @since 1.2.0
      */
     default boolean reportHourDistribution() {
-        String v = get(prefix() + ".reportHourDistribution");
-        return Boolean.parseBoolean(v);
+        return getBoolean(this, "reportHourDistribution").orElse(false);
     }
 
     /**
-     * @return {@code true} to report histogram distributions aggregated into day intervals.
-     * Default is {@code false}.
+     * @return {@code true} to report histogram distributions aggregated into day
+     * intervals. Default is {@code false}.
      * @since 1.2.0
      */
     default boolean reportDayDistribution() {
-        String v = get(prefix() + ".reportDayDistribution");
-        return Boolean.parseBoolean(v);
+        return getBoolean(this, "reportDayDistribution").orElse(false);
     }
 
     /**
-     * Wavefront metrics are grouped hierarchically by name in the UI. Setting a global prefix separates
-     * metrics originating from this app's whitebox instrumentation from those originating from other Wavefront
-     * integrations.
-     *
+     * Wavefront metrics are grouped hierarchically by name in the UI. Setting a global
+     * prefix separates metrics originating from this app's whitebox instrumentation from
+     * those originating from other Wavefront integrations.
      * @return A prefix to add to every metric.
      */
-    @Nullable
-    default String globalPrefix() {
-        return get(prefix() + ".globalPrefix");
+    default @Nullable String globalPrefix() {
+        return getString(this, "globalPrefix").orElse(null);
     }
+
+    @Override
+    default Validated<?> validate() {
+        return checkAll(this, c -> PushRegistryConfig.validate(c), checkRequired("source", WavefrontConfig::source));
+    }
+
+    default Validated<?> validateSenderConfiguration() {
+        return checkAll(this, c -> validate(), checkRequired("uri", WavefrontConfig::uri),
+                check("apiToken", WavefrontConfig::apiToken)
+                    .andThen(v -> v.invalidateWhen(token -> token == null && WavefrontMeterRegistry.isDirectToApi(this),
+                            "must be set whenever publishing directly to the Wavefront API", InvalidReason.MISSING)));
+    }
+
 }

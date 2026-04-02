@@ -1,129 +1,305 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
+
 plugins {
-    id "net.ltgt.apt" version "0.10" // for dagger injection testing
-    id 'idea'
-    id 'com.github.johnrengelman.shadow' version '4.0.3'
+    alias(libs.plugins.aspectj) apply false
 }
 
-apply plugin: 'nebula.optional-base'
+apply plugin: libs.plugins.kotlin.get().pluginId
+
+if (javaLanguageVersion.canCompileOrRun(17)) {
+    apply plugin: 'io.freefair.aspectj.post-compile-weaving'
+}
+else {
+    // ignore ajc generated code from japicmp comparison for < Java 17 builds
+    project.tasks.japicmp {
+        fieldExcludes.addAll([
+            'io.micrometer.core.aop.CountedAspect#ajc$perSingletonInstance',
+            'io.micrometer.core.aop.TimedAspect#ajc$perSingletonInstance'
+        ])
+        methodExcludes.addAll([
+            'io.micrometer.core.aop.CountedAspect#ajc$inlineAccessFieldGet$io_micrometer_core_aop_CountedAspect$io_micrometer_core_aop_CountedAspect$shouldSkip(io.micrometer.core.aop.CountedAspect)',
+            'io.micrometer.core.aop.CountedAspect#ajc$inlineAccessMethod$io_micrometer_core_aop_CountedAspect$io_micrometer_core_aop_CountedAspect$perform(io.micrometer.core.aop.CountedAspect, org.aspectj.lang.ProceedingJoinPoint, io.micrometer.core.annotation.Counted)',
+            'io.micrometer.core.aop.CountedAspect#aspectOf()',
+            'io.micrometer.core.aop.CountedAspect#hasAspect()',
+            'io.micrometer.core.aop.TimedAspect#ajc$inlineAccessFieldGet$io_micrometer_core_aop_TimedAspect$io_micrometer_core_aop_TimedAspect$shouldSkip(io.micrometer.core.aop.TimedAspect)',
+            'io.micrometer.core.aop.TimedAspect#ajc$inlineAccessMethod$io_micrometer_core_aop_TimedAspect$io_micrometer_core_aop_TimedAspect$perform(io.micrometer.core.aop.TimedAspect, org.aspectj.lang.ProceedingJoinPoint, io.micrometer.core.annotation.Timed, java.lang.reflect.Method)',
+            'io.micrometer.core.aop.TimedAspect#aspectOf()',
+            'io.micrometer.core.aop.TimedAspect#hasAspect()'
+        ])
+    }
+}
+
+description = 'Core module of Micrometer containing instrumentation API and implementation'
+
+kotlin {
+    compilerOptions {
+        jvmTarget =  JvmTarget.JVM_1_8
+        apiVersion = KotlinVersion.KOTLIN_1_8
+        languageVersion = KotlinVersion.KOTLIN_1_8
+    }
+}
+
+compileTestKotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_11
+    }
+}
+
+jar {
+    bundle {
+        bnd '''\
+        Import-Package: \
+            org.aspectj.*;resolution:=dynamic,\
+            com.github.benmanes.caffeine.*;resolution:=dynamic;version="${@}",\
+            net.sf.ehcache.*;resolution:=dynamic;version="${@}",\
+            javax.cache.*;resolution:=dynamic;version="${@}",\
+            org.hibernate.*;resolution:=dynamic;version="${@}",\
+            org.eclipse.jetty.*;resolution:=dynamic;version="${@}",\
+            org.glassfish.jersey.*;resolution:=dynamic;version="${@}",\
+            io.grpc.*;resolution:=dynamic,\
+            org.apache.hc.*;resolution:=dynamic,\
+            org.apache.http.*;resolution:=dynamic,\
+            com.netflix.hystrix.*;resolution:=dynamic;version="${@}",\
+            ch.qos.logback.*;resolution:=dynamic;version="${@}",\
+            org.apache.logging.log4j.*;resolution:=dynamic;version="${@}",\
+            okhttp3.*;resolution:=dynamic,\
+            com.mongodb.*;resolution:=dynamic;version="${@}",\
+            org.jooq.*;resolution:=dynamic;version="${@}",\
+            org.apache.kafka.*;resolution:=dynamic,\
+            com.codahale.metrics.*;resolution:=dynamic;version="${@}",\
+            com.google.common.cache.*;resolution:=dynamic;version="${@}",\
+            jakarta.servlet.*;resolution:=dynamic;version="${@}",\
+            javax.servlet.*;resolution:=dynamic;version="${@}",\
+            io.micrometer.context.*;resolution:=dynamic,\
+            io.micrometer.observation.*;resolution:=dynamic;version="${@}",\
+            kotlin.*;resolution:=dynamic,\
+            kotlinx.coroutines.*;resolution:=dynamic,\
+            org.LatencyUtils.*;resolution:=dynamic,\
+            org.HdrHistogram.*;resolution:=dynamic;version="${@}",\
+            org.apache.catalina.*;resolution:=dynamic,\
+            org.bson.*;resolution:=dynamic;version="${@}",\
+            org.slf4j.*;resolution:=dynamic,\
+            rx.*;resolution:=dynamic;version="${@}",\
+            javax.persistence.*;resolution:=dynamic;version="${@}",\
+            io.netty.*;resolution:=dynamic;version="${@}",\
+            *
+        '''.stripIndent()
+    }
+}
 
 dependencies {
-    compile 'org.pcollections:pcollections:latest.release'
+    api project(":micrometer-commons")
+    api project(":micrometer-observation")
 
-    // JSR-305 only used for non-required meta-annotations
-    compile "com.google.code.findbugs:jsr305:latest.release", optional
-
-    compile 'org.hdrhistogram:HdrHistogram:latest.release'
-    compile('org.latencyutils:LatencyUtils:latest.release') {
+    // HdrHistogram is needed at runtime when client-side percentiles are configured
+    implementation libs.hdrhistogram
+    // We need LatencyUtils to compile but users by default do not need it
+    compileOnly(libs.latencyUtils) {
+        exclude group: 'org.hdrhistogram', module: 'HdrHistogram'
+    }
+    // LatencyUtils is needed at runtime when pause detection is enabled
+    testRuntimeOnly(libs.latencyUtils) {
         exclude group: 'org.hdrhistogram', module: 'HdrHistogram'
     }
 
+    // Aspects
+    optionalApi libs.aspectjrt
+
     // instrumentation options
-    compile 'io.dropwizard.metrics:metrics-core:4.0.+', optional
+    optionalApi libs.dropwizardMetricsCore // TODO move dropwizard out of core module? DropwizardMeterRegistry for e.g. JMX registry
 
     // cache monitoring
-    compile 'com.google.guava:guava:latest.release', optional
-    compile 'com.github.ben-manes.caffeine:caffeine:2.+', optional
-    // locked to this version due to ehcache-parent 2.25 not being on central
-    compile 'net.sf.ehcache:ehcache:2.10.6', optional
-    compile 'javax.cache:cache-api:latest.release', optional
-    compile 'com.hazelcast:hazelcast:latest.release', optional
-    compile 'org.hibernate:hibernate-entitymanager:latest.release', optional
+    optionalApi libs.guava
+    optionalApi libs.caffeine
+    optionalApi libs.ehcache2
+    optionalApi libs.javax.cacheApi
+    // hard-coded to last hazelcast version to support Java 11
+    optionalApi("com.hazelcast:hazelcast:5.3.8")
+    optionalApi libs.hibernateEntitymanager
 
     // server runtime monitoring
-    // 9.4+ are incompatible with the latest version of wiremock as of 1/4/2019
-    compile 'org.eclipse.jetty:jetty-server:9.2.+', optional
-    compile 'org.apache.tomcat.embed:tomcat-embed-core:8.+', optional
+    optionalApi libs.jetty9Server
+    // jakarta servlet
+    optionalApi libs.jakarta.servletApi
+    optionalApi libs.jetty9Client
+    optionalApi libs.tomcatEmbed
+    optionalApi libs.jersey2Server
+    optionalApi libs.grpcApi
+    optionalApi libs.grpcKotlinStub
+    optionalApi platform(libs.nettyBom)
+    optionalApi 'io.netty:netty-transport'
 
     // apache httpcomponents monitoring
-    compile 'org.apache.httpcomponents:httpclient:4.5.6', optional
+    optionalApi libs.httpcomponents.client
+    optionalApi libs.httpcomponents.async
+    optionalApi libs.httpcomponents.client5
 
     // hystrix monitoring
-    // metrics are better with https://github.com/Netflix/Hystrix/pull/1568 introduced
-    // in hystrix 1.5.12, but Netflix re-released 1.5.11 as 1.5.18 late in 2018.
-    // <=1.5.11 or 1.5.18 doesn't break with Micrometer, but open metrics won't be correct necessarily.
-    compile 'com.netflix.hystrix:hystrix-core:1.5.12', optional
+    optionalApi libs.hystrix
 
     // log monitoring
-    compile 'ch.qos.logback:logback-classic:1.2.+', optional
-    compile 'org.apache.logging.log4j:log4j-core:2.+', optional
+    optionalApi libs.logback12
+    optionalApi libs.log4j
 
-    // reactor
-    compile 'io.projectreactor:reactor-core:3.2.12.RELEASE', optional
-    compile 'io.projectreactor.netty:reactor-netty:0.8.6.RELEASE', optional
+    optionalApi libs.okhttp
 
-    // @Timed AOP
-    compile 'org.aspectj:aspectjweaver:1.8.+', optional
+    optionalApi libs.mongoSync
 
-    compile 'com.squareup.okhttp3:okhttp:3.+', optional
+    optionalApi libs.jooq
 
-    compile 'org.mongodb:mongo-java-driver:latest.release', optional
+    optionalApi libs.kafkaClients
+    optionalApi libs.kafkaStreams
 
-    testCompile 'io.projectreactor:reactor-test:latest.release'
+    optionalApi project(':micrometer-observation')
+    optionalApi libs.contextPropagation
 
-    // JUnit 5
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.7.+'
+    // kotlin
+    optionalApi enforcedPlatform('org.jetbrains.kotlin:kotlin-bom')
+    optionalApi 'org.jetbrains.kotlin:kotlin-reflect'
+    optionalApi 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
+    optionalApi libs.kotlinxCoroutines
 
-    // Eclipse still needs this (as of 4.7.1a)
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.7.+'
-
-    testCompile 'org.mockito:mockito-core:latest.release'
-
-    testCompile 'org.hsqldb:hsqldb:latest.release'
+    testImplementation platform(libs.reactorBom)
+    testImplementation 'io.projectreactor:reactor-test'
+    testImplementation project(":micrometer-observation-test")
 
     // dependency injection tests
-    testCompile 'javax.inject:javax.inject:1'
-    testCompile 'org.springframework:spring-context:4.+'
-    testCompile 'org.springframework:spring-test:4.+'
-    testCompile 'com.google.inject:guice:4.1.0'
+    testImplementation libs.javax.inject
+    testImplementation libs.guice
 
     // Uncomment these if you are interested in testing injection with dagger in MeterRegistryInjectionTest
-//    testCompile 'com.google.dagger:dagger:2.11'
-//    testCompile 'com.google.dagger:dagger-compiler:2.11'
+    // testImplementation libs.dagger
+    // testAnnotationProcessor libs.daggerCompiler
 
-    testCompile 'org.assertj:assertj-core:latest.release'
-    testCompile 'org.awaitility:awaitility:latest.release'
+    // Only needed for ModifiedClassPathClassLoader
+    testImplementation(libs.spring5.core)
 
-    testCompile 'org.ehcache:ehcache:latest.release'
+    testImplementation(libs.archunitJunit5) {
+        // avoid transitively pulling in slf4j 2
+        exclude group: "org.slf4j", module: "slf4j-api"
+    }
+    // Needed for LogbackMetrics tests
+    testImplementation libs.slf4jApi
+    testImplementation(libs.junitLoggingExtension)
 
-    testCompile 'org.apache.kafka:kafka-clients:latest.release'
+    testImplementation libs.mockitoCore5
 
-    testCompile 'ru.lanwen.wiremock:wiremock-junit5:1.2.0'
-    testCompile 'com.github.tomakehurst:wiremock:latest.release'
+    testImplementation libs.hsqldb
+    testImplementation libs.h2
 
-    testCompile 'de.flapdoodle.embed:de.flapdoodle.embed.mongo:latest.release'
+    testImplementation libs.assertj
+    testImplementation libs.awaitility
+
+    testImplementation libs.ehcache3
+
+    testImplementation libs.kafkaClients
+
+    testImplementation libs.commonsPool2
+
+    testImplementation libs.jersey2TestFrameworkInmemory
+    testRuntimeOnly libs.jersey2Hk2
+
+    testImplementation libs.wiremockJunit5
+    testImplementation libs.wiremock
 
     // Log4j2 Async dependency
-    testImplementation 'com.lmax:disruptor:3.4.+'
+    testImplementation libs.lmaxDisruptor
+
+    // Kafka binder IT dependencies
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junitJupiter
+    testImplementation libs.testcontainers.kafka
+
+    // Postgres Binder IT dependencies
+    testImplementation libs.testcontainers.postgresql
+    testImplementation libs.postgre
+
+    testImplementation libs.testcontainers.mongodb
+
+    // Dependencies for @ClassPathExclusions
+    testImplementation("org.junit.platform:junit-platform-engine")
+    testImplementation(libs.junitPlatformLauncher)
+    testImplementation(libs.mavenResolverConnectorBasic)
+    testImplementation(libs.mavenResolverProvider) {
+        exclude(group: "javax.inject", module: "javax.inject")
+    }
+    testImplementation(libs.mavenResolverTransportHttp) {
+        exclude group: "org.slf4j", module: "jcl-over-slf4j"
+    }
+    // gRPC
+    testImplementation libs.grpcCore
+    testImplementation libs.grpcInprocess
+    testImplementation libs.grpcTestingProto
+    testImplementation libs.retrofit2
+
+    testImplementation libs.aspectjweaver
+
+    testImplementation libs.logbackLatest
 }
 
-shadowJar {
-    configurations = [project.configurations.compile]
-    classifier = null
-    dependencies {
-        include(dependency('org.pcollections:'))
+tasks.register("shenandoahTest", Test) {
+    // set heap size for the test JVM(s)
+    maxHeapSize = "1500m"
+
+    useJUnitPlatform {
+        includeTags 'gc'
     }
-    relocate 'org.pcollections', 'io.micrometer.shaded.org.pcollections'
-    metaInf {
-        from "$rootDir/LICENSE"
-        from "$rootDir/NOTICE"
-    }
+
+    jvmArgs '-XX:+UseShenandoahGC'
 }
 
-jar.enabled = false
-jar.dependsOn shadowJar
+tasks.register("generationalShenandoahTest", Test) {
+    // set heap size for the test JVM(s)
+    maxHeapSize = "1500m"
 
-publishing {
-    publications {
-        withType(MavenPublication) {
-            pom.withXml {
-                asNode()
-                        .dependencies
-                        .dependency
-                        .findAll {
-                    ['pcollections'].contains(it.artifactId.text())
-                }
-                .each { it.parent().remove(it) }
-            }
-        }
+    useJUnitPlatform {
+        includeTags 'gc'
     }
+
+    jvmArgs '-XX:+UseShenandoahGC', '-XX:+UnlockExperimentalVMOptions', '-XX:ShenandoahGCMode=generational'
+}
+
+tasks.register("zgcTest", Test) {
+    // set heap size for the test JVM(s)
+    maxHeapSize = "1500m"
+
+    useJUnitPlatform {
+        includeTags 'gc'
+    }
+
+    jvmArgs '-XX:+UseZGC'
+}
+
+tasks.register("zgcGenerationalTest", Test) {
+    // set heap size for the test JVM(s)
+    maxHeapSize = "1500m"
+
+    useJUnitPlatform {
+        includeTags 'gc'
+    }
+
+    jvmArgs '-XX:+UseZGC', '-XX:+ZGenerational'
+}
+
+tasks.register("openj9BalancedTest", Test) {
+    // set heap size for the test JVM(s)
+    maxHeapSize = "1500m"
+
+    useJUnitPlatform {
+        includeTags 'gc'
+    }
+
+    jvmArgs '-Xgcpolicy:balanced'
+}
+
+tasks.register("openj9ConcurrentScavengeTest", Test) {
+    // set heap size for the test JVM(s)
+    maxHeapSize = "1500m"
+
+    useJUnitPlatform {
+        includeTags 'gc'
+    }
+
+    jvmArgs '-Xgc:concurrentScavenge'
 }

@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +17,7 @@ package io.micrometer.core.instrument.config;
 
 import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,23 +31,24 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.StreamSupport.stream;
 
 /**
- * As requests are made of a {@link MeterRegistry} to create new metrics, allow for filtering out
- * the metric altogether, transforming its ID (name or tags) in some way, and transforming its
- * configuration.
+ * As requests are made of a {@link MeterRegistry} to create new metrics, allow for
+ * filtering out the metric altogether, transforming its ID (name or tags) in some way,
+ * and transforming its configuration.
  * <p>
- * All new metrics should pass through each {@link MeterFilter} in the order in which they were added.
+ * All new metrics should pass through each {@link MeterFilter} in the order in which they
+ * were added.
  *
  * @author Jon Schneider
  * @author Clint Checketts
  * @author Johnny Lim
  */
 public interface MeterFilter {
+
     /**
      * Add common tags that are applied to every meter created afterward.
      *
-     * The common tags will not override tag values from a meter ID. They will also not override previously configured
-     * common tag MeterFilters that have the same tag key.
-     *
+     * The common tags will not override tag values from a meter ID. They will also not
+     * override previously configured common tag MeterFilters that have the same tag key.
      * @param tags Common tags.
      * @return A common tag filter.
      */
@@ -62,10 +63,9 @@ public interface MeterFilter {
 
     /**
      * Rename a tag key for every metric beginning with a given prefix.
-     *
      * @param meterNamePrefix Apply filter to metrics that begin with this name.
-     * @param fromTagKey      Rename tags matching this key.
-     * @param toTagKey        Rename to this key.
+     * @param fromTagKey Rename tags matching this key.
+     * @param toTagKey Rename to this key.
      * @return A tag-renaming filter.
      */
     static MeterFilter renameTag(String meterNamePrefix, String fromTagKey, String toTagKey) {
@@ -79,7 +79,8 @@ public interface MeterFilter {
                 for (Tag tag : id.getTagsAsIterable()) {
                     if (tag.getKey().equals(fromTagKey))
                         tags.add(Tag.of(toTagKey, tag.getValue()));
-                    else tags.add(tag);
+                    else
+                        tags.add(tag);
                 }
 
                 return id.replaceTags(tags);
@@ -89,7 +90,6 @@ public interface MeterFilter {
 
     /**
      * Suppress tags with given tag keys.
-     *
      * @param tagKeys Keys of tags that should be suppressed.
      * @return A tag-suppressing filter.
      */
@@ -97,14 +97,13 @@ public interface MeterFilter {
         return new MeterFilter() {
             @Override
             public Meter.Id map(Meter.Id id) {
-                List<Tag> tags = stream(id.getTagsAsIterable().spliterator(), false)
-                        .filter(t -> {
-                            for (String tagKey : tagKeys) {
-                                if (t.getKey().equals(tagKey))
-                                    return false;
-                            }
-                            return true;
-                        }).collect(toList());
+                List<Tag> tags = stream(id.getTagsAsIterable().spliterator(), false).filter(t -> {
+                    for (String tagKey : tagKeys) {
+                        if (t.getKey().equals(tagKey))
+                            return false;
+                    }
+                    return true;
+                }).collect(toList());
 
                 return id.replaceTags(tags);
             }
@@ -112,29 +111,27 @@ public interface MeterFilter {
     }
 
     /**
-     * Replace tag values according to the provided mapping for all matching tag keys. This can be used
-     * to reduce the total cardinality of a tag by mapping some portion of tag values to something else.
-     *
-     * @param tagKey      The tag key for which replacements should be made
+     * Replace tag values according to the provided mapping for all matching tag keys.
+     * This can be used to reduce the total cardinality of a tag by mapping some portion
+     * of tag values to something else.
+     * @param tagKey The tag key for which replacements should be made
      * @param replacement The value to replace with
-     * @param exceptions  All matching tags with this value to retain its original value
+     * @param exceptions All matching tags with this value to retain its original value
      * @return A filter that replaces tag values.
      */
     static MeterFilter replaceTagValues(String tagKey, Function<String, String> replacement, String... exceptions) {
         return new MeterFilter() {
             @Override
             public Meter.Id map(Meter.Id id) {
-                List<Tag> tags = stream(id.getTagsAsIterable().spliterator(), false)
-                        .map(t -> {
-                            if (!t.getKey().equals(tagKey))
-                                return t;
-                            for (String exception : exceptions) {
-                                if (t.getValue().equals(exception))
-                                    return t;
-                            }
-                            return Tag.of(tagKey, replacement.apply(t.getValue()));
-                        })
-                        .collect(toList());
+                List<Tag> tags = stream(id.getTagsAsIterable().spliterator(), false).map(t -> {
+                    if (!t.getKey().equals(tagKey))
+                        return t;
+                    for (String exception : exceptions) {
+                        if (t.getValue().equals(exception))
+                            return t;
+                    }
+                    return Tag.of(tagKey, replacement.apply(t.getValue()));
+                }).collect(toList());
 
                 return id.replaceTags(tags);
             }
@@ -142,8 +139,8 @@ public interface MeterFilter {
     }
 
     /**
-     * Can be used to build a whitelist of metrics matching certain criteria. Opposite of {@link #deny(Predicate)}.
-     *
+     * Can be used to build a whitelist of metrics matching certain criteria. Opposite of
+     * {@link #deny(Predicate)}.
      * @param iff When a meter id matches, allow its inclusion, otherwise deny.
      * @return A meter filter that whitelists metrics matching a predicate.
      */
@@ -157,8 +154,8 @@ public interface MeterFilter {
     }
 
     /**
-     * When the given predicate is {@code true}, the meter should be present in published metrics.
-     *
+     * When the given predicate is {@code true}, the meter should be present in published
+     * metrics.
      * @param iff When a meter id matches, guarantee its inclusion in published metrics.
      * @return A filter that guarantees the inclusion of matching meters.
      */
@@ -172,9 +169,8 @@ public interface MeterFilter {
     }
 
     /**
-     * When the given predicate is {@code true}, the meter should NOT be present in published metrics.
-     * Opposite of {@link #denyUnless(Predicate)}.
-     *
+     * When the given predicate is {@code true}, the meter should NOT be present in
+     * published metrics. Opposite of {@link #denyUnless(Predicate)}.
      * @param iff When a meter id matches, guarantee its exclusion in published metrics.
      * @return A filter that guarantees the exclusion of matching meters.
      */
@@ -188,9 +184,8 @@ public interface MeterFilter {
     }
 
     /**
-     * Include a meter in published metrics. Can be used as a subordinate action on another filter like
-     * {@link #maximumAllowableTags}.
-     *
+     * Include a meter in published metrics. Can be used as a subordinate action on
+     * another filter like {@link #maximumAllowableTags}.
      * @return A filter that guarantees the inclusion of all meters.
      */
     static MeterFilter accept() {
@@ -198,9 +193,8 @@ public interface MeterFilter {
     }
 
     /**
-     * Reject a meter in published metrics. Can be used as a subordinate action on another filter like
-     * {@link #maximumAllowableTags}.
-     *
+     * Reject a meter in published metrics. Can be used as a subordinate action on another
+     * filter like {@link #maximumAllowableTags}.
      * @return A filter that guarantees the exclusion of all meters.
      */
     static MeterFilter deny() {
@@ -208,15 +202,17 @@ public interface MeterFilter {
     }
 
     /**
-     * Useful for cost-control in monitoring systems which charge directly or indirectly by the
-     * total number of time series you generate.
+     * Useful for cost-control in monitoring systems which charge directly or indirectly
+     * by the total number of time series you generate.
      * <p>
-     * While this filter doesn't discriminate between your most critical and less useful metrics in
-     * deciding what to drop (all the metrics you intend to use should fit below this threshold),
-     * it can effectively cap your risk of an accidentally high-cardinality metric costing too much.
-     *
-     * @param maximumTimeSeries The total number of unique name/tag permutations allowed before filtering kicks in.
-     * @return A filter that globally limits the number of unique name and tag combinations.
+     * While this filter doesn't discriminate between your most critical and less useful
+     * metrics in deciding what to drop (all the metrics you intend to use should fit
+     * below this threshold), it can effectively cap your risk of an accidentally
+     * high-cardinality metric costing too much.
+     * @param maximumTimeSeries The total number of unique name/tag permutations allowed
+     * before filtering kicks in.
+     * @return A filter that globally limits the number of unique name and tag
+     * combinations.
      */
     static MeterFilter maximumAllowableMetrics(int maximumTimeSeries) {
         return new MeterFilter() {
@@ -235,15 +231,15 @@ public interface MeterFilter {
 
     /**
      * Places an upper bound on the number of tags produced by matching metrics.
-     *
-     * @param meterNamePrefix  Apply filter to metrics that begin with this name.
-     * @param tagKey           The tag to place an upper bound on.
+     * @param meterNamePrefix Apply filter to metrics that begin with this name.
+     * @param tagKey The tag to place an upper bound on.
      * @param maximumTagValues The total number of tag values that are allowable.
-     * @param onMaxReached     After the maximum number of tag values have been seen, apply this filter.
+     * @param onMaxReached After the maximum number of tag values have been seen, apply
+     * this filter.
      * @return A meter filter that limits the number of tags produced by matching metrics.
      */
     static MeterFilter maximumAllowableTags(String meterNamePrefix, String tagKey, int maximumTagValues,
-                                            MeterFilter onMaxReached) {
+            MeterFilter onMaxReached) {
         return new MeterFilter() {
             private final Set<String> observedTagValues = ConcurrentHashMap.newKeySet();
 
@@ -261,13 +257,12 @@ public interface MeterFilter {
                 return MeterFilterReply.NEUTRAL;
             }
 
-            @Nullable
-            private String matchNameAndGetTagValue(Meter.Id id) {
+            private @Nullable String matchNameAndGetTagValue(Meter.Id id) {
                 return id.getName().startsWith(meterNamePrefix) ? id.getTag(tagKey) : null;
             }
 
             @Override
-            public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
+            public @Nullable DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
                 String value = matchNameAndGetTagValue(id);
                 if (value != null) {
                     if (!observedTagValues.contains(value)) {
@@ -282,9 +277,10 @@ public interface MeterFilter {
     }
 
     /**
-     * Meters that start with the provided name prefix should NOT be present in published metrics.
-     *
-     * @param prefix When a meter name starts with the prefix, guarantee its exclusion in published metrics.
+     * Meters that start with the provided name prefix should NOT be present in published
+     * metrics.
+     * @param prefix When a meter name starts with the prefix, guarantee its exclusion in
+     * published metrics.
      * @return A filter that guarantees the exclusion of matching meters.
      */
     static MeterFilter denyNameStartsWith(String prefix) {
@@ -293,8 +289,8 @@ public interface MeterFilter {
 
     /**
      * Meters that start with the provided name should be present in published metrics.
-     *
-     * @param prefix When a meter name starts with the prefix, guarantee its inclusion in published metrics.
+     * @param prefix When a meter name starts with the prefix, guarantee its inclusion in
+     * published metrics.
      * @return A filter that guarantees the inclusion of matching meters.
      * @since 1.2.0
      */
@@ -303,10 +299,10 @@ public interface MeterFilter {
     }
 
     /**
-     * Set a maximum expected value on any {@link Timer} whose name begins with the given prefix.
-     *
+     * Set a maximum expected value on any {@link Timer} whose name begins with the given
+     * prefix.
      * @param prefix Apply the maximum only to timers whose name begins with this prefix.
-     * @param max    The maximum expected value of the timer.
+     * @param max The maximum expected value of the timer.
      * @return A filter that applies a maximum expected value to a timer.
      */
     static MeterFilter maxExpected(String prefix, Duration max) {
@@ -315,9 +311,9 @@ public interface MeterFilter {
             public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
                 if (id.getType() == Meter.Type.TIMER && id.getName().startsWith(prefix)) {
                     return DistributionStatisticConfig.builder()
-                            .maximumExpectedValue(max.toNanos())
-                            .build()
-                            .merge(config);
+                        .maximumExpectedValue((double) max.toNanos())
+                        .build()
+                        .merge(config);
                 }
                 return config;
             }
@@ -325,21 +321,34 @@ public interface MeterFilter {
     }
 
     /**
-     * Set a maximum expected value on any {@link DistributionSummary} whose name begins with the given prefix.
-     *
-     * @param prefix Apply the maximum only to distribution summaries whose name begins with this prefix.
-     * @param max    The maximum expected value of the distribution summary.
+     * Set a maximum expected value on any {@link DistributionSummary} whose name begins
+     * with the given prefix.
+     * @deprecated Use {@link #maxExpected(String, double)} instead since 1.4.0.
+     * @param prefix Apply the maximum only to distribution summaries whose name begins
+     * with this prefix.
+     * @param max The maximum expected value of the distribution summary.
      * @return A filter that applies a maximum expected value to a distribution summary.
      */
+    @Deprecated
     static MeterFilter maxExpected(String prefix, long max) {
+        return maxExpected(prefix, (double) max);
+    }
+
+    /**
+     * Set a maximum expected value on any {@link DistributionSummary} whose name begins
+     * with the given prefix.
+     * @param prefix Apply the maximum only to distribution summaries whose name begins
+     * with this prefix.
+     * @param max The maximum expected value of the distribution summary.
+     * @return A filter that applies a maximum expected value to a distribution summary.
+     * @since 1.4.0
+     */
+    static MeterFilter maxExpected(String prefix, double max) {
         return new MeterFilter() {
             @Override
             public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
                 if (id.getType() == Meter.Type.DISTRIBUTION_SUMMARY && id.getName().startsWith(prefix)) {
-                    return DistributionStatisticConfig.builder()
-                            .maximumExpectedValue(max)
-                            .build()
-                            .merge(config);
+                    return DistributionStatisticConfig.builder().maximumExpectedValue(max).build().merge(config);
                 }
                 return config;
             }
@@ -347,10 +356,10 @@ public interface MeterFilter {
     }
 
     /**
-     * Set a minimum expected value on any {@link Timer} whose name begins with the given prefix.
-     *
+     * Set a minimum expected value on any {@link Timer} whose name begins with the given
+     * prefix.
      * @param prefix Apply the minimum only to timers whose name begins with this prefix.
-     * @param min    The minimum expected value of the timer.
+     * @param min The minimum expected value of the timer.
      * @return A filter that applies a minimum expected value to a timer.
      */
     static MeterFilter minExpected(String prefix, Duration min) {
@@ -359,9 +368,9 @@ public interface MeterFilter {
             public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
                 if (id.getType() == Meter.Type.TIMER && id.getName().startsWith(prefix)) {
                     return DistributionStatisticConfig.builder()
-                            .minimumExpectedValue(min.toNanos())
-                            .build()
-                            .merge(config);
+                        .minimumExpectedValue((double) min.toNanos())
+                        .build()
+                        .merge(config);
                 }
                 return config;
             }
@@ -369,53 +378,104 @@ public interface MeterFilter {
     }
 
     /**
-     * Set a minimum expected value on any {@link DistributionSummary} whose name begins with the given prefix.
-     *
-     * @param prefix Apply the minimum only to distribution summaries whose name begins with this prefix.
-     * @param min    The minimum expected value of the distribution summary.
+     * Set a minimum expected value on any {@link DistributionSummary} whose name begins
+     * with the given prefix.
+     * @deprecated Use {@link #minExpected(String, double)} instead since 1.4.0.
+     * @param prefix Apply the minimum only to distribution summaries whose name begins
+     * with this prefix.
+     * @param min The minimum expected value of the distribution summary.
      * @return A filter that applies a minimum expected value to a distribution summary.
      */
+    @Deprecated
     static MeterFilter minExpected(String prefix, long min) {
+        return minExpected(prefix, (double) min);
+    }
+
+    /**
+     * Set a minimum expected value on any {@link DistributionSummary} whose name begins
+     * with the given prefix.
+     * @param prefix Apply the minimum only to distribution summaries whose name begins
+     * with this prefix.
+     * @param min The minimum expected value of the distribution summary.
+     * @return A filter that applies a minimum expected value to a distribution summary.
+     * @since 1.4.0
+     */
+    static MeterFilter minExpected(String prefix, double min) {
         return new MeterFilter() {
             @Override
             public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
                 if (id.getType() == Meter.Type.DISTRIBUTION_SUMMARY && id.getName().startsWith(prefix)) {
-                    return DistributionStatisticConfig.builder()
-                            .minimumExpectedValue(min)
-                            .build()
-                            .merge(config);
+                    return DistributionStatisticConfig.builder().minimumExpectedValue(min).build().merge(config);
                 }
                 return config;
+            }
+        };
+    }
+
+    /**
+     * Enables the provided filter for the Meters selected by the predicate.
+     * <code>registry.config().meterFilter(MeterFilter.forMeters(id -&gt; id.getName().startsWith("test"), MeterFilter.ignoreTags("ignored")))</code>
+     * @param predicate Apply the provided filter only to Meters selected by this
+     * predicate
+     * @param delegate A filter to apply if the provided predicate returns true
+     * @return A filter that delegates calls to the delegate filter conditionally (based
+     * on the predicate)
+     * @since 1.16.0
+     */
+    static MeterFilter forMeters(Predicate<Meter.Id> predicate, MeterFilter delegate) {
+        return new MeterFilter() {
+            @Override
+            public MeterFilterReply accept(Meter.Id id) {
+                return predicate.test(id) ? delegate.accept(id) : MeterFilter.super.accept(id);
+            }
+
+            @Override
+            public Meter.Id map(Meter.Id id) {
+                return predicate.test(id) ? delegate.map(id) : MeterFilter.super.map(id);
+            }
+
+            @Override
+            public @Nullable DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
+                return predicate.test(id) ? delegate.configure(id, config) : MeterFilter.super.configure(id, config);
             }
         };
     }
 
     /**
      * @param id Id with {@link MeterFilter#map} transformations applied.
-     * @return After all transformations, should a real meter be registered for this id, or should it be no-op'd.
+     * @return After all transformations, should a real meter be registered for this id,
+     * or should it be no-op'd.
      */
     default MeterFilterReply accept(Meter.Id id) {
         return MeterFilterReply.NEUTRAL;
     }
 
     /**
+     * Transform the Meter {@link io.micrometer.core.instrument.Meter.Id Id} when
+     * registering a {@link Meter} with a {@link MeterRegistry} that has this
+     * {@link MeterFilter} configured. Note that implementations should only depend on the
+     * Id parameter and static (at runtime) values. That is, this should not be used to
+     * implement dynamic tagging, such as tagging based on a request object that will
+     * potentially be different each time metrics are to be recorded on a Meter. For such
+     * dynamic use cases, the dynamic tagging should be handled as part of the
+     * instrumentation, creating abstractions as necessary for end-users to customize the
+     * tagging behavior.
      * @param id Id to transform.
-     * @return Transformations to any part of the id.
+     * @return the transformed Id
      */
     default Meter.Id map(Meter.Id id) {
         return id;
     }
 
     /**
-     * This is only called when filtering new timers and distribution summaries (i.e. those meter types
-     * that use {@link DistributionStatisticConfig}).
-     *
-     * @param id     Id with {@link MeterFilter#map} transformations applied.
+     * This is only called when filtering new timers and distribution summaries (i.e.
+     * those meter types that use {@link DistributionStatisticConfig}).
+     * @param id Id with {@link MeterFilter#map} transformations applied.
      * @param config A histogram configuration guaranteed to be non-null.
      * @return Overrides to any part of the histogram config, when applicable.
      */
-    @Nullable
-    default DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
+    default @Nullable DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
         return config;
     }
+
 }

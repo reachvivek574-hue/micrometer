@@ -1,22 +1,60 @@
 plugins {
-    id "me.champeau.gradle.jmh" version "0.5.3"
+    id "me.champeau.jmh" version "0.7.3"
+}
+
+// skip this module when building with jdk <17
+// Dropwizard 5 has a Java 17 baseline
+if (!javaLanguageVersion.canCompileOrRun(17)) {
+    project.tasks.configureEach { task -> task.enabled = false }
+}
+
+java {
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+compileJava {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    options.release = 17
 }
 
 dependencies {
     jmh project(':micrometer-core')
+//    jmh 'io.micrometer:micrometer-core:1.16.0-M2'
     jmh project(':micrometer-registry-prometheus')
+//    jmh 'io.micrometer:micrometer-registry-prometheus:1.16.0-M2'
+    jmh project(':micrometer-registry-otlp')
+//    jmh 'io.micrometer:micrometer-registry-otlp:1.16.0-M2'
 
-    jmh 'io.dropwizard.metrics5:metrics-core:latest.release'
-    jmh 'io.prometheus:simpleclient_common:latest.release'
+    jmh libs.dropwizardMetricsCore5
+    jmh libs.prometheusMetrics
 
-    jmh 'org.openjdk.jmh:jmh-core:latest.release'
-    jmh 'org.openjdk.jmh:jmh-generator-annprocess:latest.release'
+    jmh libs.dropwizardMetricsCore
+    jmh libs.guava
+
+    jmh libs.jmhCore
+
+    jmh libs.logback12
+
+    // Nebula doesn't like having jmhAnnotationProcessor without jmh so we just add it twice.
+    jmh libs.jmhAnnotationProcessor
+    jmhAnnotationProcessor libs.jmhAnnotationProcessor
 }
 
 jmh {
-    fork = 1
-    warmupIterations = 1
-    iterations = 1
     duplicateClassesStrategy = DuplicatesStrategy.EXCLUDE
     zip64 = true
+    // So we can do these:
+    // ./gradlew :micrometer-benchmarks-core:jmh -PjmhIncludes=io.micrometer.benchmark.core.CounterBenchmark
+    // ./gradlew :micrometer-benchmarks-core:jmh -PjmhIncludes=io.micrometer.benchmark.core.CounterBenchmark -PjmhProfilers=gc
+    if (project.hasProperty('jmhIncludes')) {
+        includes = [project.property('jmhIncludes')]
+    }
+    if (project.hasProperty('jmhProfilers')) {
+        profilers = [project.property('jmhProfilers')]
+    }
+}
+
+tasks.named('jmh') {
+    outputs.upToDateWhen { false }
 }

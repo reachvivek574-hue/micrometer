@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,8 +16,14 @@
 package io.micrometer.core.instrument.simple;
 
 import io.micrometer.core.instrument.config.MeterRegistryConfig;
+import io.micrometer.core.instrument.config.validate.Validated;
 
 import java.time.Duration;
+
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.check;
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.checkAll;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.getDuration;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.getEnum;
 
 /**
  * Configuration for {@link SimpleMeterRegistry}.
@@ -25,6 +31,7 @@ import java.time.Duration;
  * @author Jon Schneider
  */
 public interface SimpleConfig extends MeterRegistryConfig {
+
     SimpleConfig DEFAULT = k -> null;
 
     @Override
@@ -36,22 +43,21 @@ public interface SimpleConfig extends MeterRegistryConfig {
      * @return The step size (reporting frequency) to use.
      */
     default Duration step() {
-        String v = get(prefix() + ".step");
-        return v == null ? Duration.ofMinutes(1) : Duration.parse(v);
+        return getDuration(this, "step").orElse(Duration.ofMinutes(1));
     }
 
     /**
-     * @return A mode that determines whether the registry reports cumulative values over all time or
-     * a rate normalized form representing changes in the last {@link #step()}.
+     * @return A mode that determines whether the registry reports cumulative values over
+     * all time or a rate normalized form representing changes in the last
+     * {@link #step()}.
      */
     default CountingMode mode() {
-        String v = get(prefix() + ".mode");
-        if (v == null)
-            return CountingMode.CUMULATIVE;
-        for (CountingMode countingMode : CountingMode.values()) {
-            if (v.equalsIgnoreCase(countingMode.name()))
-                return countingMode;
-        }
-        throw new IllegalArgumentException("Counting mode must be one of 'cumulative' or 'step' (check property " + prefix() + ".mode)");
+        return getEnum(this, CountingMode.class, "mode").orElse(CountingMode.CUMULATIVE);
     }
+
+    @Override
+    default Validated<?> validate() {
+        return checkAll(this, check("step", SimpleConfig::step), check("mode", SimpleConfig::mode));
+    }
+
 }

@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2018 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,8 +15,14 @@
  */
 package io.micrometer.kairos;
 
+import io.micrometer.core.instrument.config.validate.Validated;
 import io.micrometer.core.instrument.step.StepRegistryConfig;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
+
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.checkAll;
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.checkRequired;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.getSecret;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.getUrlString;
 
 /**
  * Configuration for {@link KairosMeterRegistry}.
@@ -33,38 +39,40 @@ public interface KairosConfig extends StepRegistryConfig {
 
     /**
      * Property prefix to prepend to configuration names.
-     *
      * @return property prefix
      */
+    @Override
     default String prefix() {
         return "kairos";
     }
 
     /**
      * The URI to send the metrics to.
-     *
      * @return uri
      */
     default String uri() {
-        String v = get(prefix() + ".uri");
-        return v == null ? "http://localhost:8080/api/v1/datapoints" : v;
+        return getUrlString(this, "uri").orElse("http://localhost:8080/api/v1/datapoints");
     }
 
     /**
-     * @return Authenticate requests with this user. By default is {@code null}, and the registry will not
-     * attempt to present credentials to KairosDB.
+     * @return Authenticate requests with this user. By default is {@code null}, and the
+     * registry will not attempt to present credentials to KairosDB.
      */
-    @Nullable
-    default String userName() {
-        return get(prefix() + ".userName");
+    default @Nullable String userName() {
+        return getSecret(this, "userName").orElse(null);
     }
 
     /**
-     * @return Authenticate requests with this password. By default is {@code null}, and the registry will not
-     * attempt to present credentials to KairosDB.
+     * @return Authenticate requests with this password. By default is {@code null}, and
+     * the registry will not attempt to present credentials to KairosDB.
      */
-    @Nullable
-    default String password() {
-        return get(prefix() + ".password");
+    default @Nullable String password() {
+        return getSecret(this, "password").orElse(null);
     }
+
+    @Override
+    default Validated<?> validate() {
+        return checkAll(this, c -> StepRegistryConfig.validate(c), checkRequired("uri", KairosConfig::uri));
+    }
+
 }

@@ -1,6 +1,7 @@
 dependencies {
-    compile project(':micrometer-core')
-    compile 'org.slf4j:slf4j-api:1.7.+'
+    api project(':micrometer-core')
 
-    testCompile project(':micrometer-test')
+    implementation libs.slf4jApi
+
+    testImplementation project(':micrometer-test')
 }

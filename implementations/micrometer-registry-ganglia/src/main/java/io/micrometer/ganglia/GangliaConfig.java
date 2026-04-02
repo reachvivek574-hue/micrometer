@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,10 +16,14 @@
 package io.micrometer.ganglia;
 
 import info.ganglia.gmetric4j.gmetric.GMetric;
+import io.micrometer.core.instrument.config.validate.Validated;
 import io.micrometer.core.instrument.step.StepRegistryConfig;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.util.concurrent.TimeUnit;
+
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.*;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.*;
 
 /**
  * Configuration for {@link GangliaMeterRegistry}.
@@ -27,6 +31,7 @@ import java.util.concurrent.TimeUnit;
  * @author Jon Schneider
  */
 public interface GangliaConfig extends StepRegistryConfig {
+
     /**
      * Accept configuration defaults
      */
@@ -34,70 +39,75 @@ public interface GangliaConfig extends StepRegistryConfig {
 
     /**
      * Get the value associated with a key.
-     *
      * @param key Key to lookup in the config.
      * @return Value for the key or null if no key is present.
      */
-    @Nullable
-    String get(String key);
+    @Override
+    @Nullable String get(String key);
 
     /**
      * @return Property prefix to prepend to configuration names.
      */
+    @Override
     default String prefix() {
         return "ganglia";
     }
 
-    default TimeUnit rateUnits() {
-        String v = get(prefix() + ".rateUnits");
-        return v == null ? TimeUnit.SECONDS : TimeUnit.valueOf(v.toUpperCase());
+    /**
+     * Rate units.
+     * @return rate units
+     * @deprecated since 1.5.0
+     */
+    @Deprecated
+    default @Nullable TimeUnit rateUnits() {
+        return null;
     }
 
     default TimeUnit durationUnits() {
-        String v = get(prefix() + ".durationUnits");
-        return v == null ? TimeUnit.MILLISECONDS : TimeUnit.valueOf(v.toUpperCase());
+        return getTimeUnit(this, "durationUnits").orElse(TimeUnit.MILLISECONDS);
     }
 
-    default String protocolVersion() {
-        String v = get(prefix() + ".protocolVersion");
-        if (v == null)
-            return "3.1";
-        if (!v.equals("3.1") && !v.equals("3.0")) {
-            throw new IllegalArgumentException("Ganglia version must be one of 3.1 or 3.0 (check property " + prefix() + ".protocolVersion)");
-        }
-        return v;
+    /**
+     * Protocol version.
+     * @return protocol version
+     * @deprecated since 1.5.0
+     */
+    @Deprecated
+    default @Nullable String protocolVersion() {
+        return null;
     }
 
     default GMetric.UDPAddressingMode addressingMode() {
-        String v = get(prefix() + ".addressingMode");
-        if (v == null)
-            return GMetric.UDPAddressingMode.MULTICAST;
-        if (!v.equalsIgnoreCase("unicast") && !v.equalsIgnoreCase("multicast")) {
-            throw new IllegalArgumentException("Ganglia UDP addressing mode must be one of 'unicast' or 'multicast' (check property " + prefix() + ".addressingMode)");
-        }
-        return GMetric.UDPAddressingMode.valueOf(v.toUpperCase());
+        return getEnum(this, GMetric.UDPAddressingMode.class, "addressingMode")
+            .orElse(GMetric.UDPAddressingMode.MULTICAST);
     }
 
     default int ttl() {
-        String v = get(prefix() + ".ttl");
-        return (v == null) ? 1 : Integer.parseInt(v);
+        return getInteger(this, "ttl").orElse(1);
     }
 
     default String host() {
-        String v = get(prefix() + ".host");
-        return (v == null) ? "localhost" : v;
+        return getString(this, "host").orElse("localhost");
     }
 
     default int port() {
-        String v = get(prefix() + ".port");
-        return (v == null) ? 8649 : Integer.parseInt(v);
+        return getInteger(this, "port").orElse(8649);
     }
 
     /**
      * @return {@code true} if publishing is enabled. Default is {@code true}.
      */
+    @Override
     default boolean enabled() {
-        String v = get(prefix() + ".enabled");
-        return v == null || Boolean.valueOf(v);
+        return getBoolean(this, "enabled").orElse(true);
     }
+
+    @Override
+    default Validated<?> validate() {
+        return checkAll(this, c -> StepRegistryConfig.validate(c), checkRequired("host", GangliaConfig::host),
+                check("port", GangliaConfig::port), checkRequired("ttl", GangliaConfig::ttl),
+                checkRequired("durationUnits", GangliaConfig::durationUnits),
+                checkRequired("addressingMode", GangliaConfig::addressingMode));
+    }
+
 }

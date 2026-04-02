@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,9 +15,18 @@
  */
 package io.micrometer.cloudwatch2;
 
-import io.micrometer.core.instrument.config.InvalidConfigurationException;
-import io.micrometer.core.instrument.config.MissingRequiredConfigurationException;
+import io.micrometer.core.annotation.Incubating;
+import io.micrometer.core.instrument.config.MeterFilter;
+import io.micrometer.core.instrument.config.validate.InvalidReason;
+import io.micrometer.core.instrument.config.validate.Validated;
 import io.micrometer.core.instrument.step.StepRegistryConfig;
+
+import java.time.Duration;
+import java.util.function.Predicate;
+
+import static io.micrometer.core.instrument.config.MeterRegistryConfigValidator.*;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.getInteger;
+import static io.micrometer.core.instrument.config.validate.PropertyValidator.getString;
 
 /**
  * Configuration for CloudWatch exporting.
@@ -27,7 +36,8 @@ import io.micrometer.core.instrument.step.StepRegistryConfig;
  */
 public interface CloudWatchConfig extends StepRegistryConfig {
 
-    int MAX_BATCH_SIZE = 20;
+    // https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_PutMetricData.html
+    int MAX_BATCH_SIZE = 1000;
 
     @Override
     default String prefix() {
@@ -35,23 +45,41 @@ public interface CloudWatchConfig extends StepRegistryConfig {
     }
 
     default String namespace() {
-        String v = get(prefix() + ".namespace");
-        if (v == null)
-            throw new MissingRequiredConfigurationException("namespace must be set to report metrics to CloudWatch");
-        return v;
+        return getString(this, "namespace").required().get();
     }
 
     @Override
     default int batchSize() {
-        String v = get(prefix() + ".batchSize");
-        if (v == null) {
-            return MAX_BATCH_SIZE;
-        }
-        int vInt = Integer.parseInt(v);
-        if (vInt > MAX_BATCH_SIZE)
-            throw new InvalidConfigurationException("batchSize must be <= " + MAX_BATCH_SIZE);
+        return Math.min(getInteger(this, "batchSize").orElse(MAX_BATCH_SIZE), MAX_BATCH_SIZE);
+    }
 
-        return vInt;
+    /**
+     * Whether to ship high-resolution metrics to CloudWatch at a higher cost. By default,
+     * if the step interval is less than one minute, we assume that high-resolution
+     * metrics are also desired.
+     *
+     * This is incubating because CloudWatch supports making this decision on a per-metric
+     * level. It's believed that deciding on a per-registry level leads to simpler
+     * configuration and will be satisfactory in most cases. To only ship a certain subset
+     * of metrics at high resolution, two {@link CloudWatchMeterRegistry} instances can be
+     * configured. One is configured with high-resolution and a
+     * {@link MeterFilter#denyUnless(Predicate)} filter. The other is configured with
+     * low-resolution and a {@link MeterFilter#deny(Predicate)} filter. Both use the same
+     * predicate.
+     * @return The decision about whether to accept higher cost high-resolution metrics.
+     * @since 1.6.0
+     */
+    @Incubating(since = "1.6.0")
+    default boolean highResolution() {
+        return step().compareTo(Duration.ofMinutes(1)) < 0;
+    }
+
+    @Override
+    default Validated<?> validate() {
+        return checkAll(this, (CloudWatchConfig c) -> StepRegistryConfig.validate(c),
+                checkRequired("namespace", CloudWatchConfig::namespace),
+                check("batchSize", CloudWatchConfig::batchSize).andThen(v -> v.invalidateWhen(b -> b > MAX_BATCH_SIZE,
+                        "cannot be greater than " + MAX_BATCH_SIZE, InvalidReason.MALFORMED)));
     }
 
 }

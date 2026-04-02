@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,8 +28,10 @@ import java.util.List;
  *
  * @author Jon Schneider
  * @author Johnny Lim
+ * @since 1.4.0
  */
 public class GraphiteHierarchicalNameMapper implements HierarchicalNameMapper {
+
     private final List<String> tagsAsPrefix;
 
     public GraphiteHierarchicalNameMapper(String... tagsAsPrefix) {
@@ -42,18 +44,19 @@ public class GraphiteHierarchicalNameMapper implements HierarchicalNameMapper {
         for (String tagKey : tagsAsPrefix) {
             String tagValue = id.getTag(tagKey);
             if (tagValue != null) {
-                hierarchicalName.append(convention.tagValue(tagValue)).append(".");
+                hierarchicalName.append(convention.tagValue(tagValue)).append('.');
             }
         }
         hierarchicalName.append(id.getConventionName(convention));
         for (Tag tag : id.getTagsAsIterable()) {
             if (!tagsAsPrefix.contains(tag.getKey())) {
-                hierarchicalName.append('.').append(convention.tagKey(tag.getKey()))
-                        .append('.').append(convention.tagValue(tag.getValue()));
+                hierarchicalName.append('.')
+                    .append(convention.tagKey(tag.getKey()))
+                    .append('.')
+                    .append(convention.tagValue(tag.getValue()));
             }
         }
         return hierarchicalName.toString();
     }
 
 }
-

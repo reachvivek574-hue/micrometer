@@ -1,82 +1,219 @@
-version: 2
-jobs:
-  build:
+version: 2.1
+
+executors:
+# TODO: add and use JDK 25 executor when upgrading to a version of the Kotlin plugin that's compatible
+#  jdk25-executor:
+#    working_directory: ~/micrometer
+#    environment:
+#      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx2048m -XX:+HeapDumpOnOutOfMemoryError"'
+#    resource_class: medium+
+#    docker:
+#      - image: cimg/openjdk:25.0
+  jdk21-executor:
     working_directory: ~/micrometer
     environment:
-      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx2048m -XX:+HeapDumpOnOutOfMemoryError"'
+      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx1g -XX:+HeapDumpOnOutOfMemoryError"'
+    resource_class: medium+
     docker:
-      - image: circleci/openjdk:11-jdk
+      - image: cimg/openjdk:21.0.9
+  jdk17-executor:
+    working_directory: ~/micrometer
+    environment:
+      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx1g -XX:+HeapDumpOnOutOfMemoryError"'
+    resource_class: medium+
+    docker:
+      - image: cimg/openjdk:17.0.17
+  machine-executor:
+    working_directory: ~/micrometer
+    machine:
+      image: ubuntu-2404:2025.09.1
+
+commands:
+  gradlew-build:
+    description: 'Run a Gradle build using the wrapper'
+    parameters:
+      command:
+        type: string
+        default: 'build'
+      toolchainVersion:
+        type: string
+        default: ''
     steps:
-
       - checkout
-
       - restore_cache:
-          key: gradle-dependencies-{{ checksum "build.gradle" }}
-
+          key: gradle-dependencies-{{ .Branch }}-{{ checksum "build.gradle" }}-{{ checksum ".circleci/config.yml" }}
       - run:
           name: downloadDependencies
           command: ./gradlew downloadDependencies --console=plain
-
       - save_cache:
-          key: gradle-dependencies-{{ checksum "build.gradle" }}
+          key: gradle-dependencies-{{ .Branch }}-{{ checksum "build.gradle" }}-{{ checksum ".circleci/config.yml" }}
           paths:
             - ~/.gradle
-
       - run:
-          name: run tests
-          command: ./gradlew check test
-
+          name: run gradle command
+          command: ./gradlew << parameters.command >> -PtoolchainVersion=<< parameters.toolchainVersion >>
       - run:
           name: collect test reports
           when: always
           command: |
             mkdir -p ~/micrometer/test-results/junit/
             find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/micrometer/test-results/junit/ \;
-
       - store_test_results:
           path: ~/micrometer/test-results/
-
       - store_artifacts:
           path: ~/micrometer/test-results/
 
+jobs:
+  build-jdk25:
+    executor: jdk21-executor
+    steps:
+      - gradlew-build:
+          toolchainVersion: '25'
+      - run: ./gradlew generationalShenandoahTest -PtoolchainVersion=25
+
+  build-jdk21:
+    executor: jdk21-executor
+    steps:
+      - gradlew-build:
+          toolchainVersion: '21'
+      - run: ./gradlew shenandoahTest -PtoolchainVersion=21
+      - run: ./gradlew zgcTest -PtoolchainVersion=21
+      - run: ./gradlew zgcGenerationalTest -PtoolchainVersion=21
+
+  build-jdk11:
+    executor: jdk21-executor
+    steps:
+      - gradlew-build:
+          toolchainVersion: '11'
+
+  build-jdk17:
+    executor: jdk17-executor
+    steps:
+      - gradlew-build:
+          toolchainVersion: '17'
+
+  concurrency-tests:
+    executor: jdk21-executor
+    steps:
+      - gradlew-build:
+          command: jcstress
+
+  docker-tests:
+    executor: machine-executor
+    steps:
+      - gradlew-build:
+          command: dockerTest
+
   deploy:
-    working_directory: ~/micrometer
-    environment:
-      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx2048m -XX:+HeapDumpOnOutOfMemoryError"'
-    docker:
-      - image: circleci/openjdk:11-jdk
+    executor: jdk21-executor
     steps:
       - checkout
       - restore_cache:
-          key: gradle-dependencies-{{ checksum "build.gradle" }}
-      - deploy:
+          key: gradle-dependencies-{{ .Branch }}-{{ checksum "build.gradle" }}-{{ checksum ".circleci/config.yml" }}
+      - run:
           name: Deployment
           command: sh ./gradle/deploy.sh
+
+  stackdriver-it:
+    executor: jdk21-executor
+    steps:
+      - run:
+          name: Setup Google Cloud auth
+          command: |
+            echo "$GCLOUD_SERVICE_KEY" >> "$HOME"/gcloud-service-key.json
+            echo 'export GOOGLE_APPLICATION_CREDENTIALS="$HOME"/gcloud-service-key.json' >> "$BASH_ENV"
+      - gradlew-build:
+          command: stackdriverTest
 
 workflows:
   version: 2
   build_prs_deploy_snapshots:
     jobs:
-      - build
-      - deploy:
-          requires:
-            - build
+      - build-jdk11
+      - build-jdk17
+      - build-jdk21
+      - build-jdk25
+      - concurrency-tests
+      - docker-tests
+      - stackdriver-it:
+          context:
+            - gcp-metrics-writer
           filters:
             branches:
               only:
-                - master
+                - main
+                - /\d+\.\d+\.x/
+      - deploy:
+          context:
+            - deploy
+          requires:
+            - build-jdk11
+            - build-jdk17
+            - build-jdk21
+            - build-jdk25
+            - concurrency-tests
+            - docker-tests
+          filters:
+            branches:
+              only:
+                - main
                 - /\d+\.\d+\.x/
   build_deploy_releases:
     jobs:
-      - build:
+      - build-jdk21:
           filters:
             branches:
               ignore: /.*/
             tags:
-              only: /^v\d+\.\d+\.\d+(-rc\.\d+)?$/
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
+      - build-jdk11:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
+      - build-jdk17:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
+      - build-jdk25:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
+      - concurrency-tests:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
+      - docker-tests:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
+      - stackdriver-it:
+          context:
+            - gcp-metrics-writer
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/
       - deploy:
+          context:
+            - deploy
           requires:
-            - build
+            - build-jdk11
+            - build-jdk17
+            - build-jdk21
+            - build-jdk25
+            - concurrency-tests
+            - docker-tests
           filters:
             tags:
-              only: /^v\d+\.\d+\.\d+(-rc\.\d+)?$/
+              only: /^v\d+\.\d+\.\d+(-(RC|M)\d+)?$/

@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,34 +18,33 @@ package io.micrometer.core.instrument.binder.cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Collections.emptyList;
 
-class GuavaCacheMetricsCompatibilityKit extends CacheMeterBinderCompatibilityKit {
-    private AtomicReference<String> loadValue = new AtomicReference<>();
+class GuavaCacheMetricsCompatibilityKit extends CacheMeterBinderCompatibilityKit<LoadingCache<String, String>> {
 
-    private LoadingCache<String, String> cache = CacheBuilder.newBuilder()
-            .maximumSize(2)
-            .recordStats()
-            .build(new CacheLoader<String, String>() {
-                @CheckForNull
-                @Override
-                public String load(@Nonnull String key) throws Exception {
-                    String val = loadValue.getAndSet(null);
-                    if (val == null)
-                        throw new Exception("don't load this key");
-                    return val;
-                }
-            });
+    private AtomicReference<@Nullable String> loadValue = new AtomicReference<>();
 
     @Override
-    public CacheMeterBinder binder() {
-        return new GuavaCacheMetrics(cache, "mycache", emptyList());
+    public LoadingCache<String, String> createCache() {
+        return CacheBuilder.newBuilder().maximumSize(2).recordStats().build(new CacheLoader<String, String>() {
+            @Override
+            public String load(String key) throws Exception {
+                String val = loadValue.getAndSet(null);
+                if (val == null)
+                    throw new Exception("don't load this key");
+                return val;
+            }
+        });
+    }
+
+    @Override
+    public CacheMeterBinder<LoadingCache<String, String>> binder() {
+        return new GuavaCacheMetrics<>(cache, "mycache", emptyList());
     }
 
     @Override
@@ -54,17 +53,20 @@ class GuavaCacheMetricsCompatibilityKit extends CacheMeterBinderCompatibilityKit
             loadValue.set(value);
             try {
                 cache.get(key);
-            } catch (ExecutionException ignored) {
+            }
+            catch (ExecutionException ignored) {
             }
         }
     }
 
     @Override
-    public String get(String key) {
+    public @Nullable String get(String key) {
         try {
             return cache.get(key);
-        } catch (Exception ignored) {
+        }
+        catch (Exception ignored) {
             return null;
         }
     }
+
 }

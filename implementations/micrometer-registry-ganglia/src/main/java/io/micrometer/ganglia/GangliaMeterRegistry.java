@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2017 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,12 +27,12 @@ import io.micrometer.core.instrument.step.StepMeterRegistry;
 import io.micrometer.core.instrument.util.DoubleFormat;
 import io.micrometer.core.instrument.util.HierarchicalNameMapper;
 import io.micrometer.core.instrument.util.NamedThreadFactory;
-import io.micrometer.core.instrument.util.TimeUtils;
-import io.micrometer.core.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
@@ -43,24 +43,30 @@ import java.util.concurrent.TimeUnit;
  * @author Johnny Lim
  */
 public class GangliaMeterRegistry extends StepMeterRegistry {
+
     private static final ThreadFactory DEFAULT_THREAD_FACTORY = new NamedThreadFactory("ganglia-metrics-publisher");
+
     private final Logger logger = LoggerFactory.getLogger(GangliaMeterRegistry.class);
+
     private final GangliaConfig config;
+
     private final HierarchicalNameMapper nameMapper;
+
     private final GMetric ganglia;
 
     /**
      * @param config The registry configuration.
-     * @param clock  The clock to use for timings.
+     * @param clock The clock to use for timings.
      */
     public GangliaMeterRegistry(GangliaConfig config, Clock clock) {
         this(config, clock, HierarchicalNameMapper.DEFAULT, DEFAULT_THREAD_FACTORY);
     }
 
     /**
-     * @param config     The registry configuration.
-     * @param clock      The clock to use for timings.
-     * @param nameMapper The name mapper to use in converting dimensional metrics to hierarchical names.
+     * @param config The registry configuration.
+     * @param clock The clock to use for timings.
+     * @param nameMapper The name mapper to use in converting dimensional metrics to
+     * hierarchical names.
      * @deprecated Use {@link #builder(GangliaConfig)} instead.
      */
     @Deprecated
@@ -68,10 +74,12 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
         this(config, clock, nameMapper, DEFAULT_THREAD_FACTORY);
     }
 
-    private GangliaMeterRegistry(GangliaConfig config, Clock clock, HierarchicalNameMapper nameMapper, ThreadFactory threadFactory) {
+    private GangliaMeterRegistry(GangliaConfig config, Clock clock, HierarchicalNameMapper nameMapper,
+            ThreadFactory threadFactory) {
         super(config, clock);
 
-        // Technically, Ganglia doesn't have any constraints on metric or tag names, but the encoding of Unicode can look
+        // Technically, Ganglia doesn't have any constraints on metric or tag names, but
+        // the encoding of Unicode can look
         // horrible in the UI. So be aware...
         this.config = config;
         this.nameMapper = nameMapper;
@@ -80,22 +88,26 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
         try {
             this.ganglia = new GMetric(config.host(), config.port(), config.addressingMode(), config.ttl());
             start(threadFactory);
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new RuntimeException("Failed to configure Ganglia metrics reporting", e);
         }
     }
 
     /**
-     * @param config         The registry configuration.
-     * @param clock          The clock to use for timings.
-     * @param nameMapper     The name mapper to use in converting dimensional metrics to hierarchical names.
+     * @param config The registry configuration.
+     * @param clock The clock to use for timings.
+     * @param nameMapper The name mapper to use in converting dimensional metrics to
+     * hierarchical names.
      * @param metricRegistry Ignored as of Micrometer 1.1.0.
-     * @deprecated The Ganglia registry no longer uses Dropwizard as of Micrometer 1.1.0, because Dropwizard
-     * dropped support for Ganglia in its 4.0.0 release. Use {@link #builder(GangliaConfig)} instead.
+     * @deprecated The Ganglia registry no longer uses Dropwizard as of Micrometer 1.1.0,
+     * because Dropwizard dropped support for Ganglia in its 4.0.0 release. Use
+     * {@link #builder(GangliaConfig)} instead.
      */
     @SuppressWarnings("unused")
     @Deprecated
-    public GangliaMeterRegistry(GangliaConfig config, Clock clock, HierarchicalNameMapper nameMapper, MetricRegistry metricRegistry) {
+    public GangliaMeterRegistry(GangliaConfig config, Clock clock, HierarchicalNameMapper nameMapper,
+            MetricRegistry metricRegistry) {
         this(config, clock, nameMapper);
     }
 
@@ -104,16 +116,9 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
     }
 
     @Override
-    public void start(ThreadFactory threadFactory) {
-        if (config.enabled()) {
-            logger.info("publishing metrics to ganglia every " + TimeUtils.format(config.step()));
-        }
-        super.start(threadFactory);
-    }
-
-    @Override
     protected void publish() {
         for (Meter meter : getMeters()) {
+            // @formatter:off
             meter.use(
                     this::announceGauge,
                     this::announceCounter,
@@ -124,12 +129,13 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
                     this::announceFunctionCounter,
                     this::announceFunctionTimer,
                     this::announceMeter);
+            // @formatter:on
         }
     }
 
     private void announceMeter(Meter meter) {
         for (Measurement measurement : meter.measure()) {
-            announce(meter, measurement.getValue(), measurement.getStatistic().toString().toLowerCase());
+            announce(meter, measurement.getValue(), measurement.getStatistic().toString().toLowerCase(Locale.ROOT));
         }
     }
 
@@ -154,7 +160,7 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
 
     private void announceSummary(DistributionSummary summary) {
         HistogramSnapshot snapshot = summary.takeSnapshot();
-        announce(summary, snapshot.count(), "count");
+        announce(summary, (double) snapshot.count(), "count");
         announce(summary, snapshot.total(), "sum");
         announce(summary, snapshot.mean(), "avg");
         announce(summary, snapshot.max(), "max");
@@ -162,7 +168,7 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
 
     private void announceTimer(Timer timer) {
         HistogramSnapshot snapshot = timer.takeSnapshot();
-        announce(timer, snapshot.count(), "count");
+        announce(timer, (double) snapshot.count(), "count");
         announce(timer, snapshot.total(getBaseTimeUnit()), "sum");
         announce(timer, snapshot.mean(getBaseTimeUnit()), "avg");
         announce(timer, snapshot.max(getBaseTimeUnit()), "max");
@@ -184,15 +190,11 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
         Meter.Id id = meter.getId();
         String baseUnit = id.getBaseUnit();
         try {
-            ganglia.announce(getMetricName(id, suffix),
-                    DoubleFormat.decimalOrNan(value),
-                    GMetricType.DOUBLE,
-                    baseUnit == null ? "" : baseUnit,
-                    GMetricSlope.BOTH,
-                    (int) config.step().getSeconds(),
-                    0,
+            ganglia.announce(getMetricName(id, suffix), DoubleFormat.decimalOrNan(value), GMetricType.DOUBLE,
+                    baseUnit == null ? "" : baseUnit, GMetricSlope.BOTH, (int) config.step().getSeconds(), 0,
                     "MICROMETER");
-        } catch (GangliaException e) {
+        }
+        catch (GangliaException e) {
             logger.warn("Unable to publish metric " + id.getName() + " to ganglia", e);
         }
     }
@@ -205,14 +207,17 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
 
     @Override
     protected TimeUnit getBaseTimeUnit() {
-        return TimeUnit.MILLISECONDS;
+        return config.durationUnits();
     }
 
     public static class Builder {
+
         private final GangliaConfig config;
 
         private Clock clock = Clock.SYSTEM;
+
         private ThreadFactory threadFactory = DEFAULT_THREAD_FACTORY;
+
         private HierarchicalNameMapper nameMapper = HierarchicalNameMapper.DEFAULT;
 
         Builder(GangliaConfig config) {
@@ -237,5 +242,7 @@ public class GangliaMeterRegistry extends StepMeterRegistry {
         public GangliaMeterRegistry build() {
             return new GangliaMeterRegistry(config, clock, nameMapper, threadFactory);
         }
+
     }
+
 }

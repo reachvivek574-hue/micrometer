@@ -1,12 +1,12 @@
-/**
+/*
  * Copyright 2019 VMware, Inc.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * https://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,11 +15,9 @@
  */
 package io.micrometer.core.instrument.noop;
 
-import io.micrometer.core.instrument.Meter.Id;
-import io.micrometer.core.instrument.Meter.Type;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.distribution.HistogramSnapshot;
-
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,7 +29,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class NoopDistributionSummaryTest {
 
-    private Id id = new Id("test", Tags.of("name", "value"), "ms", "", Type.DISTRIBUTION_SUMMARY);
+    private Meter.Id id = new Meter.Id("test", Tags.of("name", "value"), "ms", "", Meter.Type.DISTRIBUTION_SUMMARY);
+
     private NoopDistributionSummary distributionSummary = new NoopDistributionSummary(id);
 
     @Test

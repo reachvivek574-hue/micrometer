@@ -1,0 +1,18 @@
+description = 'Micrometer instrumentation for Jetty 11'
+
+dependencies {
+    api project(":micrometer-core")
+    api libs.jetty11Server
+
+    testImplementation libs.assertj
+}
+
+java {
+    targetCompatibility = 11
+}
+
+compileJava {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+    options.release = 11
+}
